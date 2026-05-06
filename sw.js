@@ -1,4 +1,4 @@
-const CACHE = 'treni-v2';
+const CACHE = 'treni-v3';
 const SHELL  = 'index.html';
 const STATIC = [
   './index.html',

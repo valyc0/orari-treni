@@ -115,7 +115,7 @@ function showPage(page) {
     if (!activeChip || activeChip.dataset.hour === 'now') {
       const now = new Date();
       const p = n => String(n).padStart(2, '0');
-      document.getElementById('routeDate').value = now.toISOString().slice(0, 10);
+      document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
       document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
     }
   } else {
@@ -690,7 +690,7 @@ function setupTimeChips(dateId, timeId, chipSel, onChange) {
       const h = btn.dataset.hour;
       if (h === 'now') {
         const n = new Date();
-        document.getElementById(dateId).value = n.toISOString().slice(0, 10);
+        document.getElementById(dateId).value = toLocalIso(n).slice(0, 10);
         document.getElementById(timeId).value = `${p(n.getHours())}:${p(n.getMinutes())}`;
       } else {
         document.getElementById(timeId).value = `${p(parseInt(h))}:00`;
@@ -709,7 +709,7 @@ function initItinerario() {
 
   // imposta data e ora al momento attuale
   const now = new Date();
-  document.getElementById('routeDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
   const p = n => String(n).padStart(2,'0');
   document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
 
