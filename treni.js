@@ -29,6 +29,7 @@ let autoRefresh = false;
 let refreshTimer = null;
 let favorites   = JSON.parse(localStorage.getItem('treni_fav') || '[]');
 let _bsToast    = null;
+let _shownTrainsKeys = new Set();
 
 /* ═══════════════════════════════════════════════
    LAYOUT
@@ -195,14 +196,16 @@ function loadOrari() {
       fetchAndRenderTrains();
     }));
 
-  document.getElementById('btnNow').addEventListener('click', () => {
-    chosenDate = null;
-    document.getElementById('dtInput').value = toLocalIso(new Date());
+  document.getElementById('btnGo').addEventListener('click', () => {
+    const dateVal = document.getElementById('orariDate').value;
+    const timeVal = document.getElementById('orariTime').value;
+    chosenDate = dateVal ? new Date(`${dateVal}T${timeVal || '00:00'}`) : null;
     fetchAndRenderTrains();
   });
-  document.getElementById('btnGo').addEventListener('click', () => {
-    const val = document.getElementById('dtInput').value;
-    chosenDate = val ? new Date(val) : null;
+  setupTimeChips('orariDate', 'orariTime', '.orari-time-btn', () => {
+    const dateVal = document.getElementById('orariDate').value;
+    const timeVal = document.getElementById('orariTime').value;
+    chosenDate = dateVal ? new Date(`${dateVal}T${timeVal || '00:00'}`) : null;
     fetchAndRenderTrains();
   });
   document.getElementById('autoRefreshToggle').addEventListener('change', e => {
@@ -235,11 +238,26 @@ function renderStationBar() {
 }
 
 function renderDatetimeBar(d) {
+  const p = n => String(n).padStart(2, '0');
+  const dateStr = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  const timeStr = `${p(d.getHours())}:${p(d.getMinutes())}`;
   return `
-  <div class="d-flex align-items-center gap-2 bg-light border-bottom px-3 py-2">
-    <input type="datetime-local" class="form-control form-control-sm flex-grow-1" id="dtInput" value="${toLocalIso(d)}">
-    <button class="btn btn-sm btn-outline-secondary flex-shrink-0" id="btnNow">Ora</button>
-    <button class="btn btn-sm btn-primary flex-shrink-0 px-3" id="btnGo">Vai</button>
+  <div class="bg-light border-bottom px-3 pt-2 pb-2">
+    <div class="d-flex gap-2 mb-2">
+      <input type="date" class="form-control form-control-sm flex-grow-1" id="orariDate" value="${dateStr}">
+      <button class="btn btn-primary px-4 fw-bold" id="btnGo">
+        <i class="bi bi-search me-1"></i>Cerca
+      </button>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="now">Adesso</button>
+      <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="6">Mattina</button>
+      <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="13">Pomeriggio</button>
+      <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="18">Sera</button>
+      <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="21">Notte</button>
+      <input type="time" class="form-control form-control-sm ms-auto" id="orariTime"
+             style="max-width:100px" value="${timeStr}">
+    </div>
   </div>`;
 }
 
@@ -298,7 +316,28 @@ async function fetchAndRenderTrains(silent = false) {
       ? await getDepartures(station.id, d)
       : await getArrivals(station.id, d);
 
-    listEl.innerHTML = renderTrainsList(trains);
+    _shownTrainsKeys = new Set();
+    const tsKey = activeTab === 'partenze' ? 'orarioPartenza' : 'orarioArrivo';
+    trains.forEach(t => _shownTrainsKeys.add(t.numeroTreno + '|' + (t.dataPartenzaTreno || '')));
+    const firstTs = trains.length ? trains[0][tsKey] : null;
+    const lastTs  = trains.length ? trains[trains.length - 1][tsKey] : null;
+
+    listEl.innerHTML = `
+      <div class="px-3 pt-2">
+        <button class="btn btn-outline-secondary btn-sm w-100 mb-2" id="btnLoadPrevTrains">
+          <i class="bi bi-arrow-up me-1"></i>Orari precedenti
+        </button>
+      </div>
+      <div id="trainsCardList">${renderTrainsList(trains)}</div>
+      <div class="px-3 pb-3">
+        <button class="btn btn-outline-secondary btn-sm w-100 mt-2" id="btnLoadNextTrains">
+          <i class="bi bi-arrow-down me-1"></i>Orari successivi
+        </button>
+      </div>`;
+
+    if (firstTs) document.getElementById('btnLoadPrevTrains').onclick = () => loadMoreTrains('prev', firstTs);
+    if (lastTs)  document.getElementById('btnLoadNextTrains').onclick = () => loadMoreTrains('next', lastTs);
+
     const now = formatTime(new Date());
     const lbl = document.getElementById('lastUpdateLabel');
     if (lbl) lbl.textContent = 'Aggiornato: ' + now;
@@ -315,6 +354,64 @@ async function fetchAndRenderTrains(silent = false) {
   } finally {
     if (ico)    ico.classList.remove('spin');
     if (btnRef) btnRef.disabled = false;
+  }
+}
+
+async function loadMoreTrains(direction, anchorTs) {
+  const btnId = direction === 'prev' ? 'btnLoadPrevTrains' : 'btnLoadNextTrains';
+  const btnEl = document.getElementById(btnId);
+  if (!btnEl) return;
+  const origHTML = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Caricamento...';
+
+  try {
+    const baseDate = direction === 'prev'
+      ? new Date(anchorTs - 3 * 60 * 60 * 1000)
+      : new Date(anchorTs);
+
+    const trains = activeTab === 'partenze'
+      ? await getDepartures(station.id, baseDate)
+      : await getArrivals(station.id, baseDate);
+
+    const tsKey = activeTab === 'partenze' ? 'orarioPartenza' : 'orarioArrivo';
+    const newTrains = trains.filter(t => {
+      const key = t.numeroTreno + '|' + (t.dataPartenzaTreno || '');
+      if (_shownTrainsKeys.has(key)) return false;
+      if (direction === 'prev' && t[tsKey] >= anchorTs) return false;
+      if (direction === 'next' && t[tsKey] <= anchorTs) return false;
+      return true;
+    });
+
+    if (!newTrains.length) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = direction === 'prev'
+        ? '<i class="bi bi-check me-1"></i>Nessun orario precedente'
+        : '<i class="bi bi-check me-1"></i>Nessun orario successivo';
+      return;
+    }
+
+    newTrains.forEach(t => _shownTrainsKeys.add(t.numeroTreno + '|' + (t.dataPartenzaTreno || '')));
+    const cardListEl = document.getElementById('trainsCardList');
+    const html = `<div class="px-3 pt-3 pb-2">${newTrains.map(renderTrainCard).join('')}</div>`;
+
+    if (direction === 'prev') {
+      cardListEl.insertAdjacentHTML('afterbegin', html);
+      const newFirstTs = newTrains[0][tsKey];
+      btnEl.disabled = false;
+      btnEl.innerHTML = origHTML;
+      btnEl.onclick = () => loadMoreTrains('prev', newFirstTs);
+    } else {
+      cardListEl.insertAdjacentHTML('beforeend', html);
+      const newLastTs = newTrains[newTrains.length - 1][tsKey];
+      btnEl.disabled = false;
+      btnEl.innerHTML = origHTML;
+      btnEl.onclick = () => loadMoreTrains('next', newLastTs);
+    }
+  } catch {
+    btnEl.disabled = false;
+    btnEl.innerHTML = origHTML;
+    showToast('Errore nel caricamento');
   }
 }
 
@@ -575,6 +672,29 @@ let _itinerarioInited = false;
 let _countdownInterval = null;
 let _shownRouteKeys = new Set();
 
+/* Funzione condivisa: collega i chip orario rapido a due input date+time */
+function setupTimeChips(dateId, timeId, chipSel, onChange) {
+  const p = n => String(n).padStart(2, '0');
+  document.querySelectorAll(chipSel).forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll(chipSel).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const h = btn.dataset.hour;
+      if (h === 'now') {
+        const n = new Date();
+        document.getElementById(dateId).value = n.toISOString().slice(0, 10);
+        document.getElementById(timeId).value = `${p(n.getHours())}:${p(n.getMinutes())}`;
+      } else {
+        document.getElementById(timeId).value = `${p(parseInt(h))}:00`;
+      }
+      if (onChange) onChange();
+    });
+  });
+  document.getElementById(timeId).addEventListener('input', () => {
+    document.querySelectorAll(chipSel).forEach(b => b.classList.remove('active'));
+  });
+}
+
 function initItinerario() {
   if (_itinerarioInited) return;
   _itinerarioInited = true;
@@ -586,25 +706,10 @@ function initItinerario() {
   document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
 
   // chip orario rapido
-  document.querySelectorAll('.route-time-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.route-time-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const h = btn.dataset.hour;
-      if (h === 'now') {
-        const n = new Date();
-        document.getElementById('routeDate').value = n.toISOString().slice(0, 10);
-        document.getElementById('routeTime').value = `${p(n.getHours())}:${p(n.getMinutes())}`;
-      } else {
-        document.getElementById('routeTime').value = `${p(parseInt(h))}:00`;
-      }
-    });
-  });
+  setupTimeChips('routeDate', 'routeTime', '.route-time-btn', null);
 
   // quando l'utente modifica manualmente il campo orario, deseleziona i chip
-  document.getElementById('routeTime').addEventListener('input', () => {
-    document.querySelectorAll('.route-time-btn').forEach(b => b.classList.remove('active'));
-  });
+  // (già gestito da setupTimeChips)
 
   // autocomplete Da
   setupRouteAc(
