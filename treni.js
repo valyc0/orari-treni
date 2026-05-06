@@ -110,6 +110,14 @@ function showPage(page) {
     document.getElementById('pageItinerario').classList.remove('d-none');
     document.getElementById('navItinerario').classList.add('active');
     initItinerario();
+    // Aggiorna data/ora se il chip "Adesso" è attivo (o nessun chip selezionato)
+    const activeChip = document.querySelector('.route-time-btn.active');
+    if (!activeChip || activeChip.dataset.hour === 'now') {
+      const now = new Date();
+      const p = n => String(n).padStart(2, '0');
+      document.getElementById('routeDate').value = now.toISOString().slice(0, 10);
+      document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
+    }
   } else {
     document.getElementById('pagePreferiti').classList.remove('d-none');
     document.getElementById('navPreferiti').classList.add('active');
