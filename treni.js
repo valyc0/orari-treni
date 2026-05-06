@@ -572,6 +572,7 @@ function showToast(msg) {
 let routeFrom = null; // { id, name }
 let routeTo   = null;
 let _itinerarioInited = false;
+let _countdownInterval = null;
 
 function initItinerario() {
   if (_itinerarioInited) return;
@@ -688,6 +689,7 @@ async function searchRoute() {
     showToast('Inserisci stazione di partenza e arrivo');
     return;
   }
+  if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
   // Aggiorna icona bottone salva in base allo stato preferiti
   const routeKey = `${routeFrom.id}→${routeTo.id}`;
   const isSaved  = favorites.some(f => f.type === 'route' && f.routeKey === routeKey);
@@ -774,6 +776,7 @@ async function searchRoute() {
         </small>
       </div>
       <div class="px-3 pb-3">${matches.map(renderRouteCard).join('')}</div>`;
+    attachRouteCardCountdowns(resEl);
   } catch (e) {
     resEl.innerHTML = `
       <div class="text-center text-muted py-5">
@@ -783,6 +786,47 @@ async function searchRoute() {
       </div>`;
     showToast('Impossibile caricare i treni');
   }
+}
+
+function attachRouteCardCountdowns(container) {
+  _countdownInterval = setInterval(() => {
+    container.querySelectorAll('.solution-card.cd-open').forEach(updateCountdownCard);
+  }, 1000);
+  container.querySelectorAll('.solution-card').forEach(card => {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => {
+      const isOpen = card.classList.contains('cd-open');
+      container.querySelectorAll('.solution-card.cd-open').forEach(c => {
+        c.classList.remove('cd-open');
+        c.querySelector('.countdown-panel').classList.add('d-none');
+      });
+      if (!isOpen) {
+        card.classList.add('cd-open');
+        card.querySelector('.countdown-panel').classList.remove('d-none');
+        updateCountdownCard(card);
+      }
+    });
+  });
+}
+
+function updateCountdownCard(card) {
+  const depTs = parseInt(card.dataset.depTs, 10);
+  const el = card.querySelector('.countdown-value');
+  if (!el || isNaN(depTs)) return;
+  const diff = depTs - Date.now();
+  if (diff <= 0) {
+    el.textContent = 'Partito';
+    el.className = 'countdown-value fw-bold text-danger';
+    return;
+  }
+  const totalSec = Math.floor(diff / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const p = n => String(n).padStart(2, '0');
+  el.textContent = h > 0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+  el.className = 'countdown-value fw-bold fs-3 ' +
+    (totalSec < 300 ? 'text-danger' : totalSec < 900 ? 'text-warning' : 'text-success');
 }
 
 function renderRouteCard({ dep, arr }) {
@@ -835,7 +879,7 @@ function renderRouteCard({ dep, arr }) {
   const toLabel   = arr.destinazione || dep.destinazione || '';
 
   return `
-  <div class="card border-0 shadow-sm mb-3 solution-card">
+  <div class="card border-0 shadow-sm mb-3 solution-card" data-dep-ts="${tDep || ''}">
     <div class="card-body p-3">
       <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
         <span class="badge ${bg} ${tx} fs-6 px-2 py-1">${esc(cat)}</span>
@@ -871,6 +915,10 @@ function renderRouteCard({ dep, arr }) {
             <div class="fw-bold text-danger ms-3" style="font-size:1.4rem;line-height:1">${arrTime}</div>
           </div>
         </div>
+      </div>
+      <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
+        <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
+        <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
       </div>
     </div>
   </div>`;
