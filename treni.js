@@ -103,10 +103,14 @@ async function getArrivals(stId, date, rawTs) {
 function showPage(page) {
   document.querySelectorAll('.app-page').forEach(p => p.classList.add('d-none'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const searchWrap = document.getElementById('searchWrap');
   if (page === 'orari') {
     document.getElementById('pageOrari').classList.remove('d-none');
     document.getElementById('navOrari').classList.add('active');
+    searchWrap.classList.remove('d-none');
   } else if (page === 'itinerario') {
+    searchWrap.classList.add('d-none');
+    closeDropdown();
     document.getElementById('pageItinerario').classList.remove('d-none');
     document.getElementById('navItinerario').classList.add('active');
     initItinerario();
@@ -119,6 +123,8 @@ function showPage(page) {
       document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
     }
   } else {
+    searchWrap.classList.add('d-none');
+    closeDropdown();
     document.getElementById('pagePreferiti').classList.remove('d-none');
     document.getElementById('navPreferiti').classList.add('active');
     renderFavorites();
