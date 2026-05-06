@@ -706,7 +706,7 @@ function initItinerario() {
   document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
 
   // chip orario rapido
-  setupTimeChips('routeDate', 'routeTime', '.route-time-btn', null);
+  setupTimeChips('routeDate', 'routeTime', '.route-time-btn', searchRoute);
 
   // quando l'utente modifica manualmente il campo orario, deseleziona i chip
   // (già gestito da setupTimeChips)
