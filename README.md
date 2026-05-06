@@ -26,4 +26,9 @@ Web app mobile-first per consultare gli orari dei treni italiani in tempo reale,
 ./serve.sh
 ```
 
-Poi apri il browser su `http://localhost:8080`.
+Il server si avvia su **HTTPS porta 4443** (genera automaticamente un certificato self-signed al primo avvio):
+
+- `https://localhost:4443`
+- `https://<IP-locale>:4443`
+
+**Per installare come app (PWA):** alla prima visita accetta l'avviso di sicurezza del browser, poi usa il menu "Aggiungi alla schermata Home" (Android/iOS) o l'icona di installazione nella barra degli indirizzi (Chrome desktop).
