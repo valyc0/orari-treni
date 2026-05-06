@@ -938,6 +938,7 @@ function attachRouteCardCountdowns(container) {
       document.querySelectorAll('.solution-card.cd-open').forEach(c => {
         c.classList.remove('cd-open');
         c.querySelector('.countdown-panel').classList.add('d-none');
+        delete c.dataset.prevSec; // resetta soglie vibrazione alla chiusura
       });
       if (!isOpen) {
         card.classList.add('cd-open');
@@ -959,6 +960,21 @@ function updateCountdownCard(card) {
     return;
   }
   const totalSec = Math.floor(diff / 1000);
+
+  // Vibrazione una sola volta al passaggio sotto le soglie: 10 min, 5 min, 2 min
+  const prevSec = parseInt(card.dataset.prevSec || '99999', 10);
+  if (prevSec >= 600 && totalSec < 600) {
+    // sotto 10 minuti: vibra 2 volte
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  } else if (prevSec >= 300 && totalSec < 300) {
+    // sotto 5 minuti: vibra 3 volte
+    if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+  } else if (prevSec >= 120 && totalSec < 120) {
+    // sotto 2 minuti: vibra 4 volte
+    if (navigator.vibrate) navigator.vibrate([400, 100, 400, 100, 400, 100, 400]);
+  }
+  card.dataset.prevSec = totalSec;
+
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
