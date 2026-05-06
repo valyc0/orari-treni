@@ -573,6 +573,7 @@ let routeFrom = null; // { id, name }
 let routeTo   = null;
 let _itinerarioInited = false;
 let _countdownInterval = null;
+let _shownRouteKeys = new Set();
 
 function initItinerario() {
   if (_itinerarioInited) return;
@@ -768,6 +769,10 @@ async function searchRoute() {
       return;
     }
 
+    _shownRouteKeys = new Set(matches.map(m => m.dep.numeroTreno + '|' + m.dep.dataPartenzaTreno));
+    const firstTs = matches[0].dep.orarioPartenza || matches[0].dep.orarioPartenzaZero;
+    const lastTs  = matches[matches.length - 1].dep.orarioPartenza || matches[matches.length - 1].dep.orarioPartenzaZero;
+
     resEl.innerHTML = `
       <div class="px-3 py-2">
         <small class="text-muted fw-semibold">
@@ -775,7 +780,20 @@ async function searchRoute() {
           &nbsp;•&nbsp; ${matches.length} treno${matches.length === 1 ? '' : 'i'}
         </small>
       </div>
-      <div class="px-3 pb-3">${matches.map(renderRouteCard).join('')}</div>`;
+      <div class="px-3">
+        <button class="btn btn-outline-secondary btn-sm w-100 mb-3" id="btnLoadPrev">
+          <i class="bi bi-arrow-up me-1"></i>Treni precedenti
+        </button>
+      </div>
+      <div class="px-3 pb-3" id="routeCardList">${matches.map(renderRouteCard).join('')}</div>
+      <div class="px-3 pb-3">
+        <button class="btn btn-outline-secondary btn-sm w-100" id="btnLoadNext">
+          <i class="bi bi-arrow-down me-1"></i>Treni successivi
+        </button>
+      </div>`;
+
+    document.getElementById('btnLoadPrev').onclick = () => loadMoreRoute('prev', firstTs);
+    document.getElementById('btnLoadNext').onclick = () => loadMoreRoute('next', lastTs);
     attachRouteCardCountdowns(resEl);
   } catch (e) {
     resEl.innerHTML = `
@@ -789,14 +807,16 @@ async function searchRoute() {
 }
 
 function attachRouteCardCountdowns(container) {
+  if (_countdownInterval) clearInterval(_countdownInterval);
   _countdownInterval = setInterval(() => {
-    container.querySelectorAll('.solution-card.cd-open').forEach(updateCountdownCard);
+    document.querySelectorAll('.solution-card.cd-open').forEach(updateCountdownCard);
   }, 1000);
-  container.querySelectorAll('.solution-card').forEach(card => {
+  container.querySelectorAll('.solution-card:not([data-cd-ready])').forEach(card => {
+    card.dataset.cdReady = '1';
     card.style.cursor = 'pointer';
     card.addEventListener('click', () => {
       const isOpen = card.classList.contains('cd-open');
-      container.querySelectorAll('.solution-card.cd-open').forEach(c => {
+      document.querySelectorAll('.solution-card.cd-open').forEach(c => {
         c.classList.remove('cd-open');
         c.querySelector('.countdown-panel').classList.add('d-none');
       });
@@ -827,6 +847,90 @@ function updateCountdownCard(card) {
   el.textContent = h > 0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
   el.className = 'countdown-value fw-bold fs-3 ' +
     (totalSec < 300 ? 'text-danger' : totalSec < 900 ? 'text-warning' : 'text-success');
+}
+
+async function loadMoreRoute(direction, anchorTs) {
+  const btnId = direction === 'prev' ? 'btnLoadPrev' : 'btnLoadNext';
+  const btnEl = document.getElementById(btnId);
+  if (!btnEl) return;
+  const origHTML = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Caricamento...';
+
+  try {
+    const baseDate = direction === 'prev'
+      ? new Date(anchorTs - 3 * 60 * 60 * 1000)
+      : new Date(anchorTs);
+
+    const windows = [0, 60, 120].map(delta => {
+      const d = new Date(baseDate.getTime() + delta * 60000);
+      return viTimestamp(d);
+    });
+
+    const [depResults, arrResults] = await Promise.all([
+      Promise.all(windows.map(ts => getDepartures(routeFrom.id, null, ts).catch(() => []))),
+      Promise.all(windows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => [])))
+    ]);
+
+    const depMap = new Map();
+    depResults.flat().forEach(t => {
+      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
+      if (!depMap.has(key)) depMap.set(key, t);
+    });
+    const arrMap = new Map();
+    arrResults.flat().forEach(t => {
+      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
+      if (!arrMap.has(key)) arrMap.set(key, t);
+    });
+
+    const newMatches = [];
+    depMap.forEach((dep, key) => {
+      if (_shownRouteKeys.has(key)) return;
+      const arr = arrMap.get(key);
+      if (!arr) return;
+      const tDep = dep.orarioPartenza || dep.orarioPartenzaZero;
+      const tArr = arr.orarioArrivo  || arr.orarioArrivoZero;
+      if (!tDep || !tArr || tDep >= tArr) return;
+      if (direction === 'prev' && tDep >= anchorTs) return;
+      if (direction === 'next' && tDep <= anchorTs) return;
+      newMatches.push({ dep, arr });
+    });
+
+    newMatches.sort((a, b) =>
+      (a.dep.orarioPartenza || a.dep.orarioPartenzaZero) -
+      (b.dep.orarioPartenza || b.dep.orarioPartenzaZero)
+    );
+    newMatches.forEach(m => _shownRouteKeys.add(m.dep.numeroTreno + '|' + m.dep.dataPartenzaTreno));
+
+    const listEl = document.getElementById('routeCardList');
+    if (!newMatches.length) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = direction === 'prev'
+        ? '<i class="bi bi-check me-1"></i>Nessun treno precedente'
+        : '<i class="bi bi-check me-1"></i>Nessun treno successivo';
+      return;
+    }
+
+    const html = newMatches.map(renderRouteCard).join('');
+    if (direction === 'prev') {
+      listEl.insertAdjacentHTML('afterbegin', html);
+      const newFirstTs = newMatches[0].dep.orarioPartenza || newMatches[0].dep.orarioPartenzaZero;
+      btnEl.disabled = false;
+      btnEl.innerHTML = origHTML;
+      btnEl.onclick = () => loadMoreRoute('prev', newFirstTs);
+    } else {
+      listEl.insertAdjacentHTML('beforeend', html);
+      const newLastTs = newMatches[newMatches.length - 1].dep.orarioPartenza || newMatches[newMatches.length - 1].dep.orarioPartenzaZero;
+      btnEl.disabled = false;
+      btnEl.innerHTML = origHTML;
+      btnEl.onclick = () => loadMoreRoute('next', newLastTs);
+    }
+    attachRouteCardCountdowns(listEl);
+  } catch {
+    btnEl.disabled = false;
+    btnEl.innerHTML = origHTML;
+    showToast('Errore nel caricamento');
+  }
 }
 
 function renderRouteCard({ dep, arr }) {
