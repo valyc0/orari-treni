@@ -16,7 +16,7 @@ Web app mobile-first per consultare gli orari dei treni italiani in tempo reale,
 
 | File | Descrizione |
 |------|-------------|
-| `treni.html` | Interfaccia utente (HTML + CSS) |
+| `index.html` | Interfaccia utente (HTML + CSS) |
 | `treni.js` | Logica applicativa (vanilla JS) |
 | `serve.sh` | Avvia un server HTTP locale su porta 8080 |
 
@@ -26,4 +26,4 @@ Web app mobile-first per consultare gli orari dei treni italiani in tempo reale,
 ./serve.sh
 ```
 
-Poi apri il browser su `http://localhost:8080/treni.html`.
+Poi apri il browser su `http://localhost:8080`.
