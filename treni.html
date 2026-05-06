@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a56db">
+  <title>Treni Italia</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      --header-h: 118px;
+      --nav-h:    62px;
+    }
+
+    body {
+      background: #f0f4f8;
+      padding-top:    var(--header-h);
+      padding-bottom: var(--nav-h);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── header ── */
+    .app-header {
+      background: linear-gradient(135deg, #1a56db 0%, #1e429f 100%);
+    }
+
+    /* ── search pill ── */
+    .search-pill {
+      background: rgba(255,255,255,.18);
+      border:     1px solid rgba(255,255,255,.3);
+      border-radius: 50px;
+      backdrop-filter: blur(4px);
+    }
+    .search-pill input {
+      background: transparent;
+      color: #fff;
+      border: none;
+      box-shadow: none;
+      font-size: 16px;
+    }
+    .search-pill input::placeholder  { color: rgba(255,255,255,.65); }
+    .search-pill input:focus         { background: transparent; color: #fff; box-shadow: none; }
+    .search-pill-icon                { color: rgba(255,255,255,.8); font-size: 1rem; }
+    .search-pill-clear               { color: rgba(255,255,255,.8); line-height: 1; }
+
+    /* ── autocomplete dropdown ── */
+    .ac-dropdown {
+      position:      absolute;
+      top:           calc(100% + 6px);
+      left: 0; right: 0;
+      z-index:       1060;
+      display:       none;
+      border-radius: 14px;
+      overflow:      hidden;
+      box-shadow:    0 8px 28px rgba(0,0,0,.2);
+      background:    #fff;
+      color:         #212529;
+    }
+    .ac-dropdown.show { display: block; }
+    .ac-item          { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .ac-item:active   { background: #f1f5f9; }
+
+    /* ── bottom nav ── */
+    .bottom-nav {
+      height: var(--nav-h);
+      box-shadow: 0 -1px 16px rgba(0,0,0,.1);
+    }
+    .nav-btn {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 2px;
+      font-size: 11px; font-weight: 600;
+      color: #9ca3af;
+      background: none; border: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: color .15s;
+    }
+    .nav-btn .n-icon { font-size: 23px; }
+    .nav-btn.active  { color: #1a56db; }
+
+    /* ── sticky tabs ── */
+    .sticky-tabs {
+      position: sticky;
+      top: var(--header-h);
+      z-index: 90;
+    }
+    .nav-tabs .nav-link        { font-weight: 600; color: #6b7280; }
+    .nav-tabs .nav-link.active { font-weight: 700; color: #1a56db; }
+    .nav-tabs .nav-link:not(.active) { border-color: transparent; }
+
+    /* ── train cards ── */
+    .train-time {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -.5px;
+      line-height: 1;
+    }
+    .platform-num {
+      font-size: 1rem;
+      font-weight: 800;
+      min-width: 36px;
+      text-align: center;
+      padding: .3rem .65rem;
+    }
+
+    /* ── categorie custom ── */
+    .bg-cat-ic  { background-color: #7c3aed; }
+    .bg-cat-icn { background-color: #0891b2; }
+
+    /* ── spin ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { display: inline-block; animation: spin .7s linear infinite; }
+
+    /* ── toast ── */
+    #toastWrap { bottom: calc(var(--nav-h) + 12px); }
+
+    /* ── itinerario ── */
+    .route-input-wrap { position: relative; }
+    .route-ac {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      z-index: 1060;
+      display: none;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 6px 24px rgba(0,0,0,.18);
+      background: #fff;
+      color: #212529;
+    }
+    .route-ac.show { display: block; }
+    .solution-card .sol-time { font-size: 1.4rem; font-weight: 800; line-height: 1; }
+    .sol-line { width: 3px; background: #1a56db; flex-shrink: 0; min-height: 32px; border-radius: 2px; }
+    .sol-dot  { width: 10px; height: 10px; border-radius: 50%; background: #1a56db; flex-shrink: 0; }
+
+    /* ── responsive tablet ── */
+    @media (min-width: 540px) {
+      body        { max-width: 540px; margin: 0 auto; }
+      .app-header,
+      .bottom-nav { max-width: 540px; left: 50% !important; right: auto !important;
+                    transform: translateX(-50%); width: 540px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════ HEADER ══════════ -->
+<header id="appHeader" class="app-header fixed-top text-white">
+  <div class="px-3 pt-3 pb-3">
+    <div class="d-flex align-items-baseline gap-2 mb-2">
+      <span class="fw-bold fs-5">🚂 Treni Italia</span>
+      <small class="opacity-75" id="lastUpdate">Orari in tempo reale</small>
+    </div>
+    <div class="position-relative" id="searchWrap">
+      <div class="search-pill d-flex align-items-center px-3 py-1 gap-2">
+        <i class="bi bi-search search-pill-icon flex-shrink-0"></i>
+        <input type="text" class="form-control py-2 px-0 border-0" id="searchInput"
+               placeholder="Cerca stazione…"
+               autocomplete="off" autocorrect="off" spellcheck="false" inputmode="search">
+        <button class="btn p-0 search-pill-clear d-none flex-shrink-0" id="searchClear" aria-label="Cancella">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="ac-dropdown" id="acDropdown">
+        <div class="list-group list-group-flush" id="acList"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+
+<!-- ══════════ PAGE: ORARI ══════════ -->
+<main class="app-page" id="pageOrari">
+  <div id="orariContent">
+    <div class="d-flex flex-column align-items-center justify-content-center text-muted py-5 mt-3">
+      <i class="bi bi-train-front-fill" style="font-size:5rem;opacity:.12"></i>
+      <h5 class="mt-3 fw-semibold">Cerca una stazione</h5>
+      <p class="small mb-0">Inserisci il nome per vedere partenze e arrivi</p>
+    </div>
+  </div>
+</main>
+
+
+<!-- ══════════ PAGE: ITINERARIO ══════════ -->
+<main class="app-page d-none" id="pageItinerario">
+  <div class="px-3 pt-3">
+    <h5 class="fw-bold mb-3">
+      <i class="bi bi-signpost-split-fill text-primary me-2"></i>Cerca itinerario
+    </h5>
+
+    <!-- Da -->
+    <div class="route-input-wrap mb-2" id="wrapFrom">
+      <div class="input-group">
+        <span class="input-group-text bg-success text-white border-success"><i class="bi bi-circle-fill" style="font-size:.55rem"></i></span>
+        <input type="text" class="form-control" id="routeFrom" placeholder="Stazione di partenza…"
+               autocomplete="off" autocorrect="off" spellcheck="false" inputmode="search">
+        <button class="btn btn-outline-secondary d-none" id="clearFrom" tabindex="-1"><i class="bi bi-x"></i></button>
+      </div>
+      <div class="route-ac" id="acFrom"><div class="list-group list-group-flush" id="acFromList"></div></div>
+    </div>
+
+    <!-- scambia -->
+    <div class="d-flex justify-content-center mb-2">
+      <button class="btn btn-sm btn-outline-primary rounded-circle px-2" id="btnSwap" title="Scambia">
+        <i class="bi bi-arrow-down-up"></i>
+      </button>
+    </div>
+
+    <!-- A -->
+    <div class="route-input-wrap mb-3" id="wrapTo">
+      <div class="input-group">
+        <span class="input-group-text bg-danger text-white border-danger"><i class="bi bi-geo-alt-fill"></i></span>
+        <input type="text" class="form-control" id="routeTo" placeholder="Stazione di arrivo…"
+               autocomplete="off" autocorrect="off" spellcheck="false" inputmode="search">
+        <button class="btn btn-outline-secondary d-none" id="clearTo" tabindex="-1"><i class="bi bi-x"></i></button>
+      </div>
+      <div class="route-ac" id="acTo"><div class="list-group list-group-flush" id="acToList"></div></div>
+    </div>
+
+    <!-- data ora + cerca + salva -->
+    <div class="d-flex gap-2 mb-2">
+      <input type="date" class="form-control form-control-sm flex-grow-1" id="routeDate">
+      <button class="btn btn-primary px-4 fw-bold" id="btnSearchRoute">
+        <i class="bi bi-search me-1"></i>Cerca
+      </button>
+    </div>
+    <!-- chip orario rapido -->
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-1">
+      <button class="btn btn-sm btn-outline-secondary route-time-btn active" data-hour="now">Adesso</button>
+      <button class="btn btn-sm btn-outline-secondary route-time-btn" data-hour="6">Mattina</button>
+      <button class="btn btn-sm btn-outline-secondary route-time-btn" data-hour="13">Pomeriggio</button>
+      <button class="btn btn-sm btn-outline-secondary route-time-btn" data-hour="18">Sera</button>
+      <button class="btn btn-sm btn-outline-secondary route-time-btn" data-hour="21">Notte</button>
+      <input type="time" class="form-control form-control-sm ms-auto" id="routeTime"
+             style="max-width:100px" aria-label="Orario personalizzato">
+    </div>
+    <div class="d-flex justify-content-end mb-3">
+      <button class="btn btn-sm btn-outline-warning" id="btnSaveRoute">
+        <i class="bi bi-star me-1"></i>Salva itinerario
+      </button>
+    </div>
+  </div>
+
+  <div id="routeResults"></div>
+</main>
+
+
+<!-- ══════════ PAGE: PREFERITI ══════════ -->
+<main class="app-page d-none" id="pagePreferiti">
+  <div class="px-3 pt-3 pb-1">
+    <h5 class="fw-bold mb-0">
+      <i class="bi bi-star-fill text-warning me-2"></i>Preferiti
+    </h5>
+  </div>
+  <div id="favList"></div>
+</main>
+
+
+<!-- ══════════ BOTTOM NAV ══════════ -->
+<nav class="bottom-nav fixed-bottom bg-white border-top d-flex">
+  <button class="nav-btn active" id="navOrari" onclick="showPage('orari')">
+    <i class="bi bi-clock-fill n-icon"></i>
+    <span>Orari</span>
+  </button>
+  <button class="nav-btn" id="navItinerario" onclick="showPage('itinerario')">
+    <i class="bi bi-signpost-split-fill n-icon"></i>
+    <span>Itinerario</span>
+  </button>
+  <button class="nav-btn" id="navPreferiti" onclick="showPage('preferiti')">
+    <i class="bi bi-star-fill n-icon"></i>
+    <span>Preferiti</span>
+  </button>
+</nav>
+
+
+<!-- ══════════ TOAST ══════════ -->
+<div id="toastWrap" class="position-fixed start-50 translate-middle-x">
+  <div id="appToast" class="toast align-items-center text-bg-dark border-0 shadow" role="alert" aria-live="assertive">
+    <div class="d-flex">
+      <div class="toast-body fw-medium" id="toastBody"></div>
+    </div>
+  </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="treni.js"></script>
+</body>
+</html>
