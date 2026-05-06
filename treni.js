@@ -133,7 +133,7 @@ searchInput.addEventListener('input', () => {
   searchTimer = setTimeout(() => doSearch(q), 380);
 });
 searchInput.addEventListener('focus', () => {
-  if (searchInput.value.trim().length >= 2) acDropdown.classList.add('show');
+  if (searchInput.value.trim().length >= 2 && acList.children.length > 0) acDropdown.classList.add('show');
 });
 searchClear.addEventListener('click', () => {
   searchInput.value = '';
@@ -144,9 +144,11 @@ searchClear.addEventListener('click', () => {
 document.addEventListener('click', e => {
   if (!e.target.closest('#searchWrap')) closeDropdown();
 });
-function closeDropdown() { acDropdown.classList.remove('show'); }
+function closeDropdown() { acDropdown.classList.remove('show'); acList.innerHTML = ''; }
 
 async function doSearch(q) {
+  acList.innerHTML = '<div class="d-flex justify-content-center align-items-center py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div><span class="ms-2 text-secondary">Ricerca...</span></div>';
+  acDropdown.classList.add('show');
   try {
     const list = await searchStations(q);
     if (!list.length) { closeDropdown(); return; }
@@ -160,6 +162,7 @@ async function doSearch(q) {
     acList.querySelectorAll('.ac-item').forEach(el =>
       el.addEventListener('click', e => { e.preventDefault(); selectStation(el.dataset.id, el.dataset.name); }));
   } catch {
+    closeDropdown();
     showToast('Errore nella ricerca – riprova');
   }
 }
@@ -635,15 +638,18 @@ function initItinerario() {
 
 function setupRouteAc(input, listEl, dropEl, clearBtn, onSelect) {
   let timer = null;
+  function closeRouteDropdown() { dropEl.classList.remove('show'); listEl.innerHTML = ''; }
   input.addEventListener('input', () => {
     const q = input.value.trim();
     clearBtn.classList.toggle('d-none', q.length === 0);
     clearTimeout(timer);
-    if (q.length < 2) { dropEl.classList.remove('show'); return; }
+    if (q.length < 2) { closeRouteDropdown(); return; }
     timer = setTimeout(async () => {
+      listEl.innerHTML = '<div class="d-flex justify-content-center align-items-center py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div><span class="ms-2 text-secondary">Ricerca...</span></div>';
+      dropEl.classList.add('show');
       try {
         const list = await searchStations(q);
-        if (!list.length) { dropEl.classList.remove('show'); return; }
+        if (!list.length) { closeRouteDropdown(); return; }
         listEl.innerHTML = list.slice(0, 8).map(s => `
           <a href="#" class="list-group-item list-group-item-action ac-item d-flex align-items-center gap-2 py-3"
              data-id="${esc(s.id)}" data-name="${esc(s.name)}">
@@ -657,20 +663,23 @@ function setupRouteAc(input, listEl, dropEl, clearBtn, onSelect) {
             onSelect({ id: el.dataset.id, name: el.dataset.name });
             input.value = el.dataset.name;
             clearBtn.classList.remove('d-none');
-            dropEl.classList.remove('show');
+            closeRouteDropdown();
           }));
-      } catch { /* ignora */ }
+      } catch { closeRouteDropdown(); }
     }, 380);
+  });
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= 2 && listEl.children.length > 0) dropEl.classList.add('show');
   });
   clearBtn.addEventListener('click', () => {
     input.value = ''; onSelect(null);
     clearBtn.classList.add('d-none');
-    dropEl.classList.remove('show');
+    closeRouteDropdown();
     input.focus();
   });
   document.addEventListener('click', e => {
     if (!e.target.closest(`#${input.closest('.route-input-wrap').id}`))
-      dropEl.classList.remove('show');
+      closeRouteDropdown();
   });
 }
 
