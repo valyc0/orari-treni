@@ -28,6 +28,11 @@ let chosenDate  = null;
 let autoRefresh = false;
 let refreshTimer = null;
 let favorites   = JSON.parse(localStorage.getItem('treni_fav') || '[]');
+let notifThresholds = JSON.parse(localStorage.getItem('notif_thresholds') || 'null') || [
+  { min: 10, enabled: true },
+  { min: 5,  enabled: true },
+  { min: 2,  enabled: true },
+];
 let _bsToast    = null;
 let _shownTrainsKeys = new Set();
 
@@ -122,6 +127,12 @@ function showPage(page) {
       document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
       document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
     }
+  } else if (page === 'impostazioni') {
+    searchWrap.classList.add('d-none');
+    closeDropdown();
+    document.getElementById('pageImpostazioni').classList.remove('d-none');
+    document.getElementById('navImpostazioni').classList.add('active');
+    renderImpostazioni();
   } else {
     searchWrap.classList.add('d-none');
     closeDropdown();
@@ -686,7 +697,98 @@ let _itinerarioInited = false;
 let _countdownInterval = null;
 let _shownRouteKeys = new Set();
 
-/* Funzione condivisa: collega i chip orario rapido a due input date+time */
+/* ═══════════════════════════════════════════════
+   NOTIFICHE
+═══════════════════════════════════════════════ */
+async function requestNotifPermission() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+}
+
+async function sendNotification(title, body, tag, vibrate) {
+  if (!('serviceWorker' in navigator) || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification(title, {
+      body,
+      icon: './icons/icon-192.png',
+      tag,
+      renotify: true,
+      vibrate,
+    });
+  } catch (_) { /* silenzioso */ }
+}
+
+/* Restituisce un pattern di vibrazione in base al "rango" della soglia:
+   rank 0 = soglia più lontana (es. 10 min) → 2 pulsazioni
+   rank 1 = soglia intermedia (es. 5 min)   → 3 pulsazioni
+   rank 2 = soglia più vicina (es. 2 min)   → 4 pulsazioni  */
+function getVibrationPattern(rank) {
+  const pulse = 200 + rank * 100;
+  const count = rank + 2; // 2, 3, 4, ...
+  const pattern = [];
+  for (let i = 0; i < count; i++) {
+    pattern.push(pulse);
+    if (i < count - 1) pattern.push(100);
+  }
+  return pattern;
+}
+
+/* ═══════════════════════════════════════════════
+   IMPOSTAZIONI
+═══════════════════════════════════════════════ */
+function renderImpostazioni() {
+  const list = document.getElementById('thresholdList');
+  if (!list) return;
+  list.innerHTML = notifThresholds.map((t, i) => `
+    <div class="d-flex align-items-center gap-3 mb-3" id="thr-row-${i}">
+      <div class="form-check form-switch mb-0 flex-shrink-0">
+        <input class="form-check-input" type="checkbox" role="switch"
+               id="thr-enabled-${i}" ${t.enabled ? 'checked' : ''}>
+      </div>
+      <div class="input-group input-group-sm" style="max-width:120px">
+        <input type="number" class="form-control" id="thr-min-${i}"
+               value="${t.min}" min="1" max="180">
+        <span class="input-group-text">min</span>
+      </div>
+      <span class="text-muted small flex-grow-1">prima della partenza</span>
+      <button class="btn btn-sm btn-outline-danger px-2" onclick="removeThreshold(${i})" title="Rimuovi">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  `).join('');
+
+  notifThresholds.forEach((_, i) => {
+    document.getElementById(`thr-enabled-${i}`)
+      .addEventListener('change', saveThresholds);
+    document.getElementById(`thr-min-${i}`)
+      .addEventListener('change', saveThresholds);
+  });
+
+  const btnAdd = document.getElementById('btnAddThreshold');
+  btnAdd.onclick = () => {
+    notifThresholds.push({ min: 15, enabled: true });
+    saveThresholds();
+    renderImpostazioni();
+  };
+}
+
+function saveThresholds() {
+  notifThresholds = notifThresholds.map((t, i) => ({
+    min:     Math.max(1, parseInt(document.getElementById(`thr-min-${i}`)?.value, 10) || t.min),
+    enabled: document.getElementById(`thr-enabled-${i}`)?.checked ?? t.enabled,
+  }));
+  localStorage.setItem('notif_thresholds', JSON.stringify(notifThresholds));
+}
+
+function removeThreshold(index) {
+  if (notifThresholds.length <= 1) return; // almeno 1 soglia
+  notifThresholds.splice(index, 1);
+  localStorage.setItem('notif_thresholds', JSON.stringify(notifThresholds));
+  renderImpostazioni();
+}
 function setupTimeChips(dateId, timeId, chipSel, onChange) {
   const p = n => String(n).padStart(2, '0');
   document.querySelectorAll(chipSel).forEach(btn => {
@@ -941,6 +1043,7 @@ function attachRouteCardCountdowns(container) {
         delete c.dataset.prevSec; // resetta soglie vibrazione alla chiusura
       });
       if (!isOpen) {
+        requestNotifPermission();
         card.classList.add('cd-open');
         card.querySelector('.countdown-panel').classList.remove('d-none');
         updateCountdownCard(card);
@@ -961,17 +1064,24 @@ function updateCountdownCard(card) {
   }
   const totalSec = Math.floor(diff / 1000);
 
-  // Vibrazione una sola volta al passaggio sotto le soglie: 10 min, 5 min, 2 min
+  // Notifica + vibrazione una sola volta al passaggio sotto le soglie configurate
   const prevSec = parseInt(card.dataset.prevSec || '99999', 10);
-  if (prevSec >= 600 && totalSec < 600) {
-    // sotto 10 minuti: vibra 2 volte
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-  } else if (prevSec >= 300 && totalSec < 300) {
-    // sotto 5 minuti: vibra 3 volte
-    if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
-  } else if (prevSec >= 120 && totalSec < 120) {
-    // sotto 2 minuti: vibra 4 volte
-    if (navigator.vibrate) navigator.vibrate([400, 100, 400, 100, 400, 100, 400]);
+  const trainLabel = card.dataset.trainLabel || 'Treno';
+  const enabledThresholds = notifThresholds
+    .filter(t => t.enabled && t.min > 0)
+    .sort((a, b) => b.min - a.min); // discendente: [10, 5, 2, ...]
+  for (let i = 0; i < enabledThresholds.length; i++) {
+    const sec = enabledThresholds[i].min * 60;
+    const minLabel = enabledThresholds[i].min;
+    if (prevSec >= sec && totalSec < sec) {
+      const vib = getVibrationPattern(i);
+      if (navigator.vibrate) navigator.vibrate(vib);
+      const body = minLabel === 1
+        ? 'Partenza tra meno di 1 minuto'
+        : `Partenza tra meno di ${minLabel} minuti`;
+      sendNotification(trainLabel, body, `treno-${minLabel}min`, vib);
+      break;
+    }
   }
   card.dataset.prevSec = totalSec;
 
@@ -1117,8 +1227,9 @@ function renderRouteCard({ dep, arr }) {
   const fromLabel = dep.origine || '';
   const toLabel   = arr.destinazione || dep.destinazione || '';
 
+  const trainLabel = `${cat} ${numLabel} → ${routeTo.name}`.trim();
   return `
-  <div class="card border-0 shadow-sm mb-3 solution-card" data-dep-ts="${tDep || ''}">
+  <div class="card border-0 shadow-sm mb-3 solution-card" data-dep-ts="${tDep || ''}" data-train-label="${esc(trainLabel)}">
     <div class="card-body p-3">
       <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
         <span class="badge ${bg} ${tx} fs-6 px-2 py-1">${esc(cat)}</span>

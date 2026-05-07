@@ -267,6 +267,27 @@
 </main>
 
 
+<!-- ══════════ PAGE: IMPOSTAZIONI ══════════ -->
+<main class="app-page d-none" id="pageImpostazioni">
+  <div class="px-3 pt-3">
+    <h5 class="fw-bold mb-3">
+      <i class="bi bi-gear-fill text-secondary me-2"></i>Impostazioni
+    </h5>
+
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-1">Notifiche di partenza</h6>
+        <p class="text-muted small mb-3">Attiva o modifica i minuti prima della partenza in cui vuoi essere avvisato.</p>
+        <div id="thresholdList"></div>
+        <button class="btn btn-sm btn-outline-secondary mt-1" id="btnAddThreshold">
+          <i class="bi bi-plus-circle me-1"></i>Aggiungi soglia
+        </button>
+      </div>
+    </div>
+  </div>
+</main>
+
+
 <!-- ══════════ BOTTOM NAV ══════════ -->
 <nav class="bottom-nav fixed-bottom bg-white border-top d-flex">
   <button class="nav-btn active" id="navOrari" onclick="showPage('orari')">
@@ -280,6 +301,10 @@
   <button class="nav-btn" id="navPreferiti" onclick="showPage('preferiti')">
     <i class="bi bi-star-fill n-icon"></i>
     <span>Preferiti</span>
+  </button>
+  <button class="nav-btn" id="navImpostazioni" onclick="showPage('impostazioni')">
+    <i class="bi bi-gear-fill n-icon"></i>
+    <span>Impost.</span>
   </button>
 </nav>
 

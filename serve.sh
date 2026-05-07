@@ -13,8 +13,8 @@ fi
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "Server HTTPS avviato:"
-echo "  https://localhost:4443"
-echo "  https://${LOCAL_IP}:4443"
+echo "  https://localhost:8443"
+echo "  https://${LOCAL_IP}:8443"
 echo ""
 echo "Prima visita: accetta l'avviso di sicurezza nel browser,"
 echo "poi potrai installare l'app dalla barra degli indirizzi."
@@ -31,7 +31,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain('cert.pem', 'key.pem')
 
-server = http.server.HTTPServer(('0.0.0.0', 4443), Handler)
+server = http.server.HTTPServer(('0.0.0.0', 8443), Handler)
 server.socket = ctx.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
 EOF
