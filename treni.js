@@ -789,6 +789,27 @@ function removeThreshold(index) {
   localStorage.setItem('notif_thresholds', JSON.stringify(notifThresholds));
   renderImpostazioni();
 }
+
+function resetThresholds() {
+  notifThresholds = [
+    { min: 10, enabled: true },
+    { min: 5,  enabled: true },
+    { min: 2,  enabled: true },
+  ];
+  localStorage.setItem('notif_thresholds', JSON.stringify(notifThresholds));
+  renderImpostazioni();
+  showToast('Soglie ripristinate ai valori default');
+}
+
+async function cancelAllNotifications() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const notifications = await reg.getNotifications();
+    notifications.forEach(n => n.close());
+    showToast(`${notifications.length} notifiche annullate`);
+  } catch (_) { showToast('Errore nell\'annullamento'); }
+}
 function setupTimeChips(dateId, timeId, chipSel, onChange) {
   const p = n => String(n).padStart(2, '0');
   document.querySelectorAll(chipSel).forEach(btn => {
@@ -1035,6 +1056,25 @@ function attachRouteCardCountdowns(container) {
   container.querySelectorAll('.solution-card:not([data-cd-ready])').forEach(card => {
     card.dataset.cdReady = '1';
     card.style.cursor = 'pointer';
+
+    // pulsante allarme: stoppa propagazione e toglla lo stato
+    const notifBtn = card.querySelector('.cd-notif-btn');
+    if (notifBtn) {
+      notifBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const isActive = card.dataset.notifDisabled !== '1';
+        if (isActive) {
+          // disattiva
+          card.dataset.notifDisabled = '1';
+        } else {
+          // attiva: richiedi permesso se necessario
+          await requestNotifPermission();
+          card.dataset.notifDisabled = '';
+        }
+        updateNotifBtn(card);
+      });
+    }
+
     card.addEventListener('click', () => {
       const isOpen = card.classList.contains('cd-open');
       document.querySelectorAll('.solution-card.cd-open').forEach(c => {
@@ -1043,13 +1083,28 @@ function attachRouteCardCountdowns(container) {
         delete c.dataset.prevSec; // resetta soglie vibrazione alla chiusura
       });
       if (!isOpen) {
-        requestNotifPermission();
+        // allarme disattivo di default all'apertura
+        card.dataset.notifDisabled = '1';
         card.classList.add('cd-open');
         card.querySelector('.countdown-panel').classList.remove('d-none');
+        updateNotifBtn(card);
         updateCountdownCard(card);
       }
     });
   });
+}
+
+function updateNotifBtn(card) {
+  const btn = card.querySelector('.cd-notif-btn');
+  if (!btn) return;
+  const disabled = card.dataset.notifDisabled === '1';
+  if (disabled) {
+    btn.className = 'btn btn-sm btn-success mt-1 cd-notif-btn';
+    btn.innerHTML = '<i class="bi bi-bell me-1"></i>Attiva allarme';
+  } else {
+    btn.className = 'btn btn-sm btn-outline-danger mt-1 cd-notif-btn';
+    btn.innerHTML = '<i class="bi bi-bell-slash me-1"></i>Disattiva allarme';
+  }
 }
 
 function updateCountdownCard(card) {
@@ -1066,21 +1121,23 @@ function updateCountdownCard(card) {
 
   // Notifica + vibrazione una sola volta al passaggio sotto le soglie configurate
   const prevSec = parseInt(card.dataset.prevSec || '99999', 10);
-  const trainLabel = card.dataset.trainLabel || 'Treno';
-  const enabledThresholds = notifThresholds
-    .filter(t => t.enabled && t.min > 0)
-    .sort((a, b) => b.min - a.min); // discendente: [10, 5, 2, ...]
-  for (let i = 0; i < enabledThresholds.length; i++) {
-    const sec = enabledThresholds[i].min * 60;
-    const minLabel = enabledThresholds[i].min;
-    if (prevSec >= sec && totalSec < sec) {
-      const vib = getVibrationPattern(i);
-      if (navigator.vibrate) navigator.vibrate(vib);
-      const body = minLabel === 1
-        ? 'Partenza tra meno di 1 minuto'
-        : `Partenza tra meno di ${minLabel} minuti`;
-      sendNotification(trainLabel, body, `treno-${minLabel}min`, vib);
-      break;
+  if (card.dataset.notifDisabled !== '1') {
+    const trainLabel = card.dataset.trainLabel || 'Treno';
+    const enabledThresholds = notifThresholds
+      .filter(t => t.enabled && t.min > 0)
+      .sort((a, b) => b.min - a.min); // discendente: [10, 5, 2, ...]
+    for (let i = 0; i < enabledThresholds.length; i++) {
+      const sec = enabledThresholds[i].min * 60;
+      const minLabel = enabledThresholds[i].min;
+      if (prevSec >= sec && totalSec < sec) {
+        const vib = getVibrationPattern(i);
+        if (navigator.vibrate) navigator.vibrate(vib);
+        const body = minLabel === 1
+          ? 'Partenza tra meno di 1 minuto'
+          : `Partenza tra meno di ${minLabel} minuti`;
+        sendNotification(trainLabel, body, `treno-${minLabel}min`, vib);
+        break;
+      }
     }
   }
   card.dataset.prevSec = totalSec;
@@ -1269,6 +1326,9 @@ function renderRouteCard({ dep, arr }) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <button class="btn btn-sm btn-success mt-1 cd-notif-btn">
+          <i class="bi bi-bell me-1"></i>Attiva allarme
+        </button>
       </div>
     </div>
   </div>`;

@@ -282,6 +282,14 @@
         <button class="btn btn-sm btn-outline-secondary mt-1" id="btnAddThreshold">
           <i class="bi bi-plus-circle me-1"></i>Aggiungi soglia
         </button>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn btn-sm btn-outline-warning flex-grow-1" onclick="resetThresholds()">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Ripristina default
+          </button>
+          <button class="btn btn-sm btn-outline-danger flex-grow-1" onclick="cancelAllNotifications()">
+            <i class="bi bi-bell-slash me-1"></i>Annulla tutte
+          </button>
+        </div>
       </div>
     </div>
   </div>
