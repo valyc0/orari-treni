@@ -317,6 +317,30 @@
 </nav>
 
 
+<!-- ══════════ MODALE TRATTA ══════════ -->
+<div class="modal fade" id="trattaModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2 px-3">
+        <h6 class="modal-title fw-bold mb-0" id="trattaModalTitle">Tratta</h6>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-secondary" id="trattaRefreshBtn" title="Aggiorna">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+      </div>
+      <div class="modal-body p-0" id="trattaModalBody">
+        <div class="d-flex flex-column align-items-center justify-content-center py-5 text-muted">
+          <div class="spinner-border text-primary" role="status"></div>
+          <small class="mt-3">Caricamento tratta…</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <!-- ══════════ TOAST ══════════ -->
 <div id="toastWrap" class="position-fixed start-50 translate-middle-x">
   <div id="appToast" class="toast align-items-center text-bg-dark border-0 shadow" role="alert" aria-live="assertive">

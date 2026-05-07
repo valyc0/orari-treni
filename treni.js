@@ -1075,6 +1075,15 @@ function attachRouteCardCountdowns(container) {
       });
     }
 
+    // pulsante vedi tratta
+    const trattaBtn = card.querySelector('.cd-tratta-btn');
+    if (trattaBtn) {
+      trattaBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        openTrattaModal(card);
+      });
+    }
+
     card.addEventListener('click', () => {
       const isOpen = card.classList.contains('cd-open');
       document.querySelectorAll('.solution-card.cd-open').forEach(c => {
@@ -1099,10 +1108,10 @@ function updateNotifBtn(card) {
   if (!btn) return;
   const disabled = card.dataset.notifDisabled === '1';
   if (disabled) {
-    btn.className = 'btn btn-sm btn-success mt-1 cd-notif-btn';
+    btn.className = 'btn btn-sm btn-success cd-notif-btn';
     btn.innerHTML = '<i class="bi bi-bell me-1"></i>Attiva allarme';
   } else {
-    btn.className = 'btn btn-sm btn-outline-danger mt-1 cd-notif-btn';
+    btn.className = 'btn btn-sm btn-outline-danger cd-notif-btn';
     btn.innerHTML = '<i class="bi bi-bell-slash me-1"></i>Disattiva allarme';
   }
 }
@@ -1285,8 +1294,18 @@ function renderRouteCard({ dep, arr }) {
   const toLabel   = arr.destinazione || dep.destinazione || '';
 
   const trainLabel = `${cat} ${numLabel} → ${routeTo.name}`.trim();
+  const codOrigine = dep.codOrigine || '';
+  const trainNum   = dep.numeroTreno || '';
+  const trainDate  = dep.dataPartenzaTreno || '';
   return `
-  <div class="card border-0 shadow-sm mb-3 solution-card" data-dep-ts="${tDep || ''}" data-train-label="${esc(trainLabel)}">
+  <div class="card border-0 shadow-sm mb-3 solution-card"
+       data-dep-ts="${tDep || ''}"
+       data-train-label="${esc(trainLabel)}"
+       data-train-num="${esc(String(trainNum))}"
+       data-train-date="${esc(String(trainDate))}"
+       data-cod-origine="${esc(codOrigine)}"
+       data-route-from="${esc(routeFrom.name)}"
+       data-route-to="${esc(routeTo.name)}">
     <div class="card-body p-3">
       <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
         <span class="badge ${bg} ${tx} fs-6 px-2 py-1">${esc(cat)}</span>
@@ -1326,12 +1345,283 @@ function renderRouteCard({ dep, arr }) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
-        <button class="btn btn-sm btn-success mt-1 cd-notif-btn">
-          <i class="bi bi-bell me-1"></i>Attiva allarme
-        </button>
+        <div class="d-flex gap-2 justify-content-center mt-1">
+          <button class="btn btn-sm btn-success cd-notif-btn">
+            <i class="bi bi-bell me-1"></i>Attiva allarme
+          </button>
+          <button class="btn btn-sm btn-outline-primary cd-tratta-btn">
+            <i class="bi bi-map me-1"></i>Vedi tratta
+          </button>
+        </div>
       </div>
     </div>
   </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   TRATTA / ANDAMENTO TRENO
+═══════════════════════════════════════════════ */
+let _trattaModal        = null;
+let _trattaCard         = null;
+let _trattaInterval     = null;
+let _trattaCountdown    = null;
+const TRATTA_REFRESH_S  = 30;
+
+function openTrattaModal(card) {
+  _trattaCard = card;
+  const label = card.dataset.trainLabel || 'Tratta';
+  document.getElementById('trattaModalTitle').textContent = label;
+  document.getElementById('trattaModalBody').innerHTML = `
+    <div class="d-flex flex-column align-items-center justify-content-center py-5 text-muted">
+      <div class="spinner-border text-primary" role="status"></div>
+      <small class="mt-3">Caricamento tratta…</small>
+    </div>`;
+
+  if (!_trattaModal) {
+    const modalEl = document.getElementById('trattaModal');
+    _trattaModal = new bootstrap.Modal(modalEl);
+    document.getElementById('trattaRefreshBtn').addEventListener('click', () => {
+      if (_trattaCard) { _startTrattaAutoRefresh(); loadTratta(_trattaCard); }
+    });
+    modalEl.addEventListener('hidden.bs.modal', _stopTrattaAutoRefresh);
+  }
+  _trattaModal.show();
+  _startTrattaAutoRefresh();
+  loadTratta(card);
+}
+
+function _startTrattaAutoRefresh() {
+  _stopTrattaAutoRefresh();
+  let remaining = TRATTA_REFRESH_S;
+  _updateTrattaCountdownBadge(remaining);
+  _trattaCountdown = setInterval(() => {
+    remaining--;
+    _updateTrattaCountdownBadge(remaining);
+    if (remaining <= 0) {
+      remaining = TRATTA_REFRESH_S;
+      if (_trattaCard) loadTratta(_trattaCard);
+    }
+  }, 1000);
+}
+
+function _stopTrattaAutoRefresh() {
+  clearInterval(_trattaCountdown);
+  clearInterval(_trattaInterval);
+  _trattaCountdown = null;
+  _trattaInterval  = null;
+  _updateTrattaCountdownBadge(null);
+}
+
+function _updateTrattaCountdownBadge(sec) {
+  const btn = document.getElementById('trattaRefreshBtn');
+  if (!btn) return;
+  btn.innerHTML = sec !== null
+    ? `<i class="bi bi-arrow-clockwise"></i> <small>${sec}s</small>`
+    : `<i class="bi bi-arrow-clockwise"></i>`;
+}
+
+async function loadTratta(card) {
+  const trainNum   = card.dataset.trainNum;
+  const trainDate  = card.dataset.trainDate;
+  const codOrigine = card.dataset.codOrigine;
+  const fromName   = card.dataset.routeFrom || '';
+  const toName     = card.dataset.routeTo   || '';
+  const depTs      = parseInt(card.dataset.depTs, 10) || 0;
+  const body       = document.getElementById('trattaModalBody');
+  if (!trainNum) {
+    body.innerHTML = `<p class="text-center text-muted py-4">Dati treno non disponibili</p>`;
+    return;
+  }
+
+  // Spinner solo al primo caricamento (body vuoto), poi aggiorna silenziosamente
+  const isFirstLoad = !body.querySelector('.d-flex:not(.spinner-border)') && !body.querySelector('.px-3');
+  if (isFirstLoad) {
+    body.innerHTML = `
+      <div class="d-flex flex-column align-items-center justify-content-center py-5 text-muted">
+        <div class="spinner-border text-primary" role="status"></div>
+        <small class="mt-3">Caricamento tratta…</small>
+      </div>`;
+  }
+
+  try {
+    const path = `/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`;
+    const data = await apiJson(path);
+    body.innerHTML = renderFermate(data, fromName, toName, depTs);
+    // Ripristina il countdown senza resettare il timer
+  } catch {
+    body.innerHTML = `
+      <div class="text-center text-muted py-4">
+        <i class="bi bi-wifi-off" style="font-size:2.5rem;opacity:.25"></i>
+        <p class="mt-2 small">Impossibile caricare la tratta</p>
+      </div>`;
+  }
+}
+
+function renderFermate(data, fromName, toName, depTs) {
+  const fermate = data.fermate || [];
+  if (!fermate.length) return `<p class="text-center text-muted py-4">Nessuna fermata disponibile</p>`;
+
+  const ritardo = data.ritardo || 0;
+  const ultimaStaz = data.stazioneUltimoRilevamento || '';
+  const ultimaOra  = data.oraUltimoRilevamento
+    ? formatTime(new Date(data.oraUltimoRilevamento)) : '';
+
+  // Trova la fermata "corrente" (ultima passata)
+  // 1) Fermate con dato reale dall'API (actualFermataType o orario reale)
+  let lastPassedIdx = -1;
+  fermate.forEach((f, i) => {
+    if (f.actualFermataType === 1 || f.actualFermataType === 2 ||
+        f.effettiva || f.arrivoReale || f.partenzaReale) {
+      lastPassedIdx = i;
+    }
+  });
+  // 2) Euristica temporale con ritardo: orario programmato + ritardo globale < ora attuale
+  const now = Date.now();
+  const delayMs = (ritardo || 0) * 60000;
+  fermate.forEach((f, i) => {
+    if (i <= lastPassedIdx) return;
+    const oraProg = f.programmata || f.arrivo_teorico || f.partenza_teorica;
+    if (oraProg && (oraProg + delayMs) < now) lastPassedIdx = i;
+  });
+
+  // Identifica indici fermata di partenza e arrivo itinerario (match case-insensitive)
+  const norm = s => (s || '').trim().toLowerCase();
+  const fromNorm = norm(fromName);
+  const toNorm   = norm(toName);
+  const fromIdx = fermate.findIndex(f => norm(f.stazione).includes(fromNorm) || fromNorm.includes(norm(f.stazione)));
+  const toIdx   = fermate.findIndex(f => norm(f.stazione).includes(toNorm)   || toNorm.includes(norm(f.stazione)));
+
+  // 3) Se la fermata di partenza itinerario è identificata e il suo orario previsto
+  //    (depTs dalla card + ritardo) è già passato, segna tutto fino a lei come passato
+  if (fromIdx >= 0 && depTs > 0 && (depTs + delayMs) < now) {
+    lastPassedIdx = Math.max(lastPassedIdx, fromIdx);
+  }
+
+  let html = '';
+
+  // Banner direzione: prima e ultima fermata dell'intero percorso
+  if (fermate.length >= 2) {
+    const capoInizio = fermate[0];
+    const capoFine   = fermate[fermate.length - 1];
+    const oraInizio  = capoInizio.partenza_teorica || capoInizio.programmata;
+    const oraFine    = capoFine.arrivo_teorico || capoFine.programmata;
+    html += `
+      <div class="px-3 py-2 border-bottom" style="background:rgba(26,86,219,.04)">
+        <div class="d-flex align-items-center gap-2">
+          <i class="bi bi-train-front-fill text-primary" style="font-size:1.1rem"></i>
+          <div class="flex-grow-1 min-w-0">
+            <div class="d-flex align-items-center gap-1 flex-wrap" style="font-size:.8rem">
+              <span class="fw-semibold text-truncate">${esc(capoInizio.stazione)}</span>
+              ${oraInizio ? `<span class="text-muted">${formatTime(new Date(oraInizio))}</span>` : ''}
+              <i class="bi bi-arrow-right text-muted mx-1"></i>
+              <span class="fw-semibold text-truncate">${esc(capoFine.stazione)}</span>
+              ${oraFine ? `<span class="text-muted">${formatTime(new Date(oraFine))}</span>` : ''}
+            </div>
+            <div class="text-muted" style="font-size:.72rem"><i class="bi bi-arrow-down me-1"></i>Orari crescenti dall'alto verso il basso</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (ultimaStaz || ritardo) {
+    const ritBadge = ritardo > 5
+      ? `<span class="badge bg-danger ms-2">+${ritardo} min</span>`
+      : ritardo > 0
+        ? `<span class="badge bg-warning text-dark ms-2">+${ritardo} min</span>`
+        : `<span class="badge bg-success ms-2">Puntuale</span>`;
+    html += `
+      <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi bi-geo-alt-fill text-primary"></i>
+        <span class="small fw-semibold">${ultimaStaz ? esc(ultimaStaz) : '—'}</span>
+        ${ultimaOra ? `<span class="text-muted small">${ultimaOra}</span>` : ''}
+        ${ritBadge}
+      </div>`;
+  }
+
+  html += '<div class="px-3 pt-2 pb-3">';
+  fermate.forEach((f, i) => {
+    const isPassed  = i < lastPassedIdx;
+    const isCurrent = i === lastPassedIdx;
+
+    const isFrom    = fromIdx >= 0 && i === fromIdx;
+    const isTo      = toIdx   >= 0 && i === toIdx;
+    const inRoute   = fromIdx >= 0 && toIdx >= 0 && i > fromIdx && i < toIdx;
+
+    const oraProg = f.arrivo_teorico || f.programmata;
+    const oraReal = f.effettiva || f.arrivoReale || f.partenzaReale;
+    const oraStr  = oraProg ? formatTime(new Date(oraProg)) : '--:--';
+    const oraRealStr = oraReal && oraReal !== oraProg ? formatTime(new Date(oraReal)) : null;
+
+    const fRitardo = f.ritardo || 0;
+    let ritBadge = '';
+    if (isCurrent || isPassed) {
+      if (fRitardo > 5)      ritBadge = `<span class="badge bg-danger ms-1">+${fRitardo}'</span>`;
+      else if (fRitardo > 0) ritBadge = `<span class="badge bg-warning text-dark ms-1">+${fRitardo}'</span>`;
+    }
+
+    // Colore dot e linea
+    let dotColor, lineColor, dotSize;
+    if (isFrom) {
+      dotColor = '#1a56db'; lineColor = '#1a56db'; dotSize = 14;
+    } else if (isTo) {
+      dotColor = '#dc3545'; lineColor = isPassed ? '#6c757d' : '#ced4da'; dotSize = 14;
+    } else if (inRoute) {
+      dotColor = isPassed ? '#6c757d' : '#1a56db';
+      lineColor = isPassed ? '#6c757d' : '#1a56db';
+      dotSize = 8;
+    } else {
+      dotColor = isPassed ? '#6c757d' : '#ced4da';
+      lineColor = isPassed ? '#6c757d' : '#ced4da';
+      dotSize = 8;
+    }
+    if (isCurrent) { dotColor = '#1a56db'; dotSize = 14; }
+
+    // Stile nome fermata
+    let nameCls, timeStyle;
+    if (isFrom) {
+      nameCls = 'fw-bold text-primary'; timeStyle = 'color:#1a56db;font-weight:700';
+    } else if (isTo) {
+      nameCls = 'fw-bold text-danger';  timeStyle = 'color:#dc3545;font-weight:700';
+    } else if (inRoute) {
+      nameCls = isPassed ? 'text-muted' : 'fw-semibold'; timeStyle = '';
+    } else {
+      nameCls = isPassed ? 'text-muted' : 'text-muted'; timeStyle = 'color:#9ca3af';
+    }
+    if (isCurrent) nameCls += ' text-primary';
+
+    // Sfondo riga per fermate itinerario
+    let rowBg = '';
+    if (isFrom) rowBg = 'background:rgba(26,86,219,.06);border-radius:6px;padding:2px 4px;';
+    else if (isTo) rowBg = 'background:rgba(220,53,69,.06);border-radius:6px;padding:2px 4px;';
+    else if (inRoute) rowBg = 'background:rgba(26,86,219,.03);border-radius:4px;padding:1px 4px;';
+
+    const isLast = i === fermate.length - 1;
+    const dotOutline = isCurrent ? ';outline:3px solid rgba(26,86,219,.3)' : '';
+
+    html += `
+      <div class="d-flex gap-2 align-items-stretch" style="min-height:${isLast?'auto':'48px'}">
+        <!-- timeline -->
+        <div class="d-flex flex-column align-items-center flex-shrink-0" style="width:18px;padding-top:4px">
+          <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${dotColor};flex-shrink:0${dotOutline}"></div>
+          ${!isLast ? `<div style="width:3px;flex:1;background:${lineColor};border-radius:2px;margin-top:3px"></div>` : ''}
+        </div>
+        <!-- contenuto -->
+        <div class="flex-grow-1 pb-2" style="${rowBg}">
+          <div class="d-flex justify-content-between align-items-start">
+            <span class="${nameCls}" style="font-size:.9rem">${esc(f.stazione || '')}</span>
+            <span class="ms-2 flex-shrink-0" style="font-size:.9rem;${timeStyle}">${oraStr}${oraRealStr && oraRealStr !== oraStr ? ` <span class="text-muted" style="font-size:.75rem">(${oraRealStr})</span>` : ''}</span>
+          </div>
+          ${ritBadge}
+          ${isCurrent ? `<div class="text-primary" style="font-size:.72rem;margin-top:1px"><i class="bi bi-train-front-fill me-1"></i>Qui ora</div>` : ''}
+          ${i === 0 ? `<div class="text-secondary" style="font-size:.72rem"><i class="bi bi-flag-fill me-1"></i>Capolinea partenza</div>` : ''}
+          ${i === fermate.length - 1 ? `<div class="text-secondary" style="font-size:.72rem"><i class="bi bi-flag-fill me-1"></i>Capolinea arrivo</div>` : ''}
+          ${isFrom ? `<div class="text-primary" style="font-size:.72rem"><i class="bi bi-circle-fill me-1"></i>Partenza itinerario</div>` : ''}
+          ${isTo   ? `<div class="text-danger"  style="font-size:.72rem"><i class="bi bi-geo-alt-fill me-1"></i>Arrivo itinerario</div>` : ''}
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  return html;
 }
 
 /* ═══════════════════════════════════════════════
