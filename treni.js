@@ -1328,8 +1328,10 @@ function renderRouteCard({ dep, arr }) {
   const codOrigine = dep.codOrigine || '';
   const trainNum   = dep.numeroTreno || '';
   const trainDate  = dep.dataPartenzaTreno || '';
+  const isPast = tDep && tDep < Date.now();
   return `
-  <div class="card border-0 shadow-sm mb-3 solution-card"
+  <div class="card border-0 shadow-sm mb-3 solution-card${isPast ? ' opacity-50' : ''}"
+       style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${tDep || ''}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(trainNum))}"
@@ -1359,7 +1361,10 @@ function renderRouteCard({ dep, arr }) {
               ${fromLabel ? `<small class="text-muted">da ${esc(fromLabel)}</small>` : ''}
               ${binDepHtml}
             </div>
-            <div class="fw-bold text-primary ms-3" style="font-size:1.4rem;line-height:1">${depTime}</div>
+            <div class="text-end ms-3 flex-shrink-0">
+              <div class="fw-bold text-primary" style="font-size:1.4rem;line-height:1">${depTime}</div>
+              ${isPast ? `<small class="text-muted fst-italic" style="font-size:.72rem">Partito</small>` : ''}
+            </div>
           </div>
           <hr class="my-2">
           <!-- arrivo -->
@@ -1954,6 +1959,7 @@ function renderConnectionCard(c) {
   const transDep = formatTime(new Date(transfer.depTime));
   const durStr = totalMin < 60 ? `${totalMin} min` : `${Math.floor(totalMin/60)}h ${totalMin%60}m`;
   const trainLabel = `${cat1} ${num1} + ${cat2} ${num2} → ${routeTo.name}`.trim();
+  const isPast = leg1.depTime && leg1.depTime < Date.now();
 
   // Binario partenza leg1 (da /partenze)
   const binDep1 = leg1.train.binarioEffettivoPartenzaDescrizione || leg1.train.binarioProgrammatoPartenzaDescrizione;
@@ -1978,7 +1984,8 @@ function renderConnectionCard(c) {
     </div>` : '';
 
   return `
-  <div class="card border-0 shadow-sm mb-3 solution-card connection-card"
+  <div class="card border-0 shadow-sm mb-3 solution-card connection-card${isPast ? ' opacity-50' : ''}"
+       style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${leg1.depTime || ''}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(leg1.train.numeroTreno || ''))}"
@@ -2014,7 +2021,10 @@ function renderConnectionCard(c) {
               </div>
               ${binDep1Html}
             </div>
-            <div class="fw-bold text-primary ms-3" style="font-size:1.4rem;line-height:1">${depTime}</div>
+            <div class="text-end ms-3 flex-shrink-0">
+              <div class="fw-bold text-primary" style="font-size:1.4rem;line-height:1">${depTime}</div>
+              ${isPast ? `<small class="text-muted fst-italic" style="font-size:.72rem">Partito</small>` : ''}
+            </div>
           </div>
           <hr class="my-2">
           <!-- coincidenza -->
