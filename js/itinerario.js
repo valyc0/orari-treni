@@ -109,7 +109,7 @@ async function searchRoute() {
   const routeKey = `${routeFrom.id}→${routeTo.id}`;
   const isSaved  = favorites.some(f => f.type === 'route' && f.routeKey === routeKey);
   const btnS = document.getElementById('btnSaveRoute');
-  if (btnS) btnS.innerHTML = `<i class="bi bi-star${isSaved ? '-fill' : ''} me-1"></i>${isSaved ? 'Salvato' : 'Salva itinerario'}`;
+  if (btnS) btnS.innerHTML = `<i class="bi bi-star${isSaved ? '-fill' : ''}"></i>`;
 
   const dateStr = document.getElementById('routeDate').value;
   const timeStr = document.getElementById('routeTime').value;
