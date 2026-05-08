@@ -48,26 +48,42 @@ function buildArrivalWindows(date0) {
 /**
  * Esegue una fetch tramite il pool di proxy CORS con auto-fallback.
  * Ricorda l'ultimo proxy funzionante per le chiamate successive.
+ * Le richieste sono limitate a MAX_CONCURRENT per evitare rate-limiting.
  */
+const _sem = { max: 5, n: 0, q: [] };
+function _semAcquire() {
+  if (_sem.n < _sem.max) { _sem.n++; return Promise.resolve(); }
+  return new Promise(res => _sem.q.push(res));
+}
+function _semRelease() {
+  _sem.n--;
+  if (_sem.q.length > 0) { _sem.n++; _sem.q.shift()(); }
+}
+
 async function proxyFetch(path) {
-  const targetUrl = VT_BASE + path;
-  const start = _proxyOk !== null ? _proxyOk : 0;
-  for (let i = 0; i < PROXY_POOL.length; i++) {
-    const idx = (start + i) % PROXY_POOL.length;
-    try {
-      const resp = await fetch(PROXY_POOL[idx](targetUrl), {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const text = await resp.text();
-      // Scarta risposte HTML (homepage del proxy che non ha funzionato)
-      if (text.trimStart().startsWith('<')) throw new Error('HTML response');
-      _proxyOk = idx;
-      return text;
-    } catch { /* prova il prossimo */ }
+  await _semAcquire();
+  try {
+    const targetUrl = VT_BASE + path;
+    const start = _proxyOk !== null ? _proxyOk : 0;
+    for (let i = 0; i < PROXY_POOL.length; i++) {
+      const idx = (start + i) % PROXY_POOL.length;
+      try {
+        const resp = await fetch(PROXY_POOL[idx](targetUrl), {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const text = await resp.text();
+        // Scarta risposte HTML (homepage del proxy che non ha funzionato)
+        if (text.trimStart().startsWith('<')) throw new Error('HTML response');
+        _proxyOk = idx;
+        return text;
+      } catch { /* prova il prossimo */ }
+    }
+    throw new Error('Tutti i proxy falliti');
+  } finally {
+    _semRelease();
   }
-  throw new Error('Tutti i proxy falliti');
 }
 
 async function apiText(path) { return proxyFetch(path); }

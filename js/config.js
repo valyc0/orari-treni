@@ -11,8 +11,8 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 
 // CORS proxy pool – viene usato il primo che risponde correttamente
 const PROXY_POOL = [
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,
   u => `https://cors-proxy.fringe.zone/${u}`,
   u => `https://thingproxy.freeboard.io/fetch/${u}`,
