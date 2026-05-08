@@ -10,11 +10,12 @@
  * @returns {Array} Array di oggetti { key, leg1, transfer, leg2, totalMin }
  */
 async function searchRouteWithConnections(date0) {
-  const windows = buildTimeWindows(date0);
+  const windows    = buildTimeWindows(date0);
+  const arrWindows = buildArrivalWindows(date0);
 
   const [depResults, arrResults] = await Promise.all([
-    Promise.all(windows.map(ts => getDepartures(routeFrom.id, null, ts).catch(() => []))),
-    Promise.all(windows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
+    Promise.all(windows.map(ts    => getDepartures(routeFrom.id, null, ts).catch(() => []))),
+    Promise.all(arrWindows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
   ]);
 
   // Deduplica partenze e arrivi per numeroTreno
@@ -104,9 +105,126 @@ async function searchRouteWithConnections(date0) {
   // Ordina per orario di partenza e deduplica per coppia di treni
   connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime);
   const seen = new Set();
-  return connections.filter(c => {
+  const direct = connections.filter(c => {
     if (seen.has(c.key)) return false;
     seen.add(c.key);
+    return true;
+  });
+
+  // Se andamentoTreno non ha restituito fermate (treni futuri non ancora
+  // partiti), usa il fallback basato su destinazione/origine degli endpoint
+  // /partenze e /arrivi senza bisogno di andamentoTreno.
+  if (direct.length > 0) return direct;
+  const allFermateEmpty = [...depDetails, ...arrDetails].every(d => d.fermate.length === 0);
+  if (!allFermateEmpty) return direct;
+  return searchRouteHubFallback(date0, depMap, arrMap);
+}
+
+/**
+ * Fallback per treni non ancora partiti: individua hub di cambio
+ * confrontando "destinazione" delle partenze da A con "origine" degli
+ * arrivi a B, poi verifica gli orari interrogando /partenze e /arrivi
+ * sull'hub stesso.
+ */
+async function searchRouteHubFallback(date0, depMap, arrMap) {
+  const MIN_TRANSFER_MS = 10 * 60 * 1000;
+
+  // Mappa hub-name → { depTrains: [...], arrTrains: [...], codOrigine }
+  const hubsFromDep = new Map();
+  depMap.forEach(t => {
+    const dest = t.destinazione;
+    if (!dest) return;
+    if (!hubsFromDep.has(dest)) hubsFromDep.set(dest, []);
+    hubsFromDep.get(dest).push(t);
+  });
+
+  const matchedHubs = new Map();
+  arrMap.forEach(t => {
+    const orig = t.origine;
+    if (!orig || !hubsFromDep.has(orig) || !t.codOrigine) return;
+    if (!matchedHubs.has(orig)) {
+      matchedHubs.set(orig, {
+        depTrains:  hubsFromDep.get(orig),
+        arrTrains:  [],
+        codOrigine: t.codOrigine,
+      });
+    }
+    matchedHubs.get(orig).arrTrains.push(t);
+  });
+
+  if (!matchedHubs.size) return [];
+
+  const windows    = buildTimeWindows(date0);
+  const arrWindows = buildArrivalWindows(date0);
+  const connections = [];
+
+  for (const [hubName, { depTrains, arrTrains, codOrigine }] of matchedHubs) {
+    // Partenze dall'hub (per trovare l'orario di partenza dei treni leg2)
+    const hubDepsRaw = await Promise.all(
+      windows.map(ts => getDepartures(codOrigine, null, ts).catch(() => []))
+    );
+    // Arrivi all'hub (per trovare l'orario di arrivo dei treni leg1)
+    const hubArrsRaw = await Promise.all(
+      arrWindows.map(ts => getArrivals(codOrigine, null, ts).catch(() => []))
+    );
+
+    const hubDepByNum = new Map();
+    hubDepsRaw.flat().forEach(t => {
+      if (!t.numeroTreno) return;
+      const k = String(t.numeroTreno);
+      if (!hubDepByNum.has(k)) hubDepByNum.set(k, t);
+    });
+    const hubArrByNum = new Map();
+    hubArrsRaw.flat().forEach(t => {
+      if (!t.numeroTreno) return;
+      const k = String(t.numeroTreno);
+      if (!hubArrByNum.has(k)) hubArrByNum.set(k, t);
+    });
+
+    for (const leg1Train of depTrains) {
+      const hubArrTrain = hubArrByNum.get(String(leg1Train.numeroTreno));
+      const arrAtHub = hubArrTrain?.orarioArrivo || hubArrTrain?.orarioArrivoZero;
+      if (!arrAtHub) continue;
+
+      for (const leg2Train of arrTrains) {
+        const hubDepTrain = hubDepByNum.get(String(leg2Train.numeroTreno));
+        const depFromHub = hubDepTrain?.orarioPartenza || hubDepTrain?.orarioPartenzaZero;
+        if (!depFromHub) continue;
+
+        const depFromA = leg1Train.orarioPartenza || leg1Train.orarioPartenzaZero;
+        const arrAtB   = leg2Train.orarioArrivo   || leg2Train.orarioArrivoZero;
+        if (!depFromA || !arrAtB) continue;
+        if (arrAtHub + MIN_TRANSFER_MS > depFromHub) continue;
+        if (depFromA >= arrAtHub) continue;
+        if (depFromHub >= arrAtB) continue;
+
+        const binEff  = hubDepTrain.binarioEffettivoPartenzaDescrizione  || hubDepTrain.binarioProgrammatoPartenzaDescrizione  || null;
+        const binProg = hubDepTrain.binarioProgrammatoPartenzaDescrizione || null;
+
+        connections.push({
+          key:      `${leg1Train.numeroTreno}→${leg2Train.numeroTreno}`,
+          leg1:     { train: leg1Train, depTime: depFromA },
+          transfer: {
+            stationId:   codOrigine,
+            stationName: hubName,
+            arrTime:     arrAtHub,
+            depTime:     depFromHub,
+            waitMin:     Math.round((depFromHub - arrAtHub) / 60000),
+            binEff,
+            binProg,
+          },
+          leg2:     { train: leg2Train, arrTime: arrAtB },
+          totalMin: Math.round((arrAtB - depFromA) / 60000),
+        });
+      }
+    }
+  }
+
+  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime);
+  const seen2 = new Set();
+  return connections.filter(c => {
+    if (seen2.has(c.key)) return false;
+    seen2.add(c.key);
     return true;
   });
 }

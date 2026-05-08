@@ -33,6 +33,19 @@ function buildTimeWindows(date0) {
 }
 
 /**
+ * Finestre temporali per gli ARRIVI a destinazione.
+ * Copre un range più ampio (+0…+300 min) perché il viaggio può
+ * durare diverse ore e il treno compare in /arrivi solo nell'ora
+ * in cui effettivamente arriva.
+ */
+function buildArrivalWindows(date0) {
+  return [0, 60, 120, 180, 240, 300].map(deltaMin => {
+    const d = new Date(date0.getTime() + deltaMin * 60000);
+    return viTimestamp(d);
+  });
+}
+
+/**
  * Esegue una fetch tramite il pool di proxy CORS con auto-fallback.
  * Ricorda l'ultimo proxy funzionante per le chiamate successive.
  */

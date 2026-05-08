@@ -42,6 +42,29 @@ function initItinerario() {
 
   document.getElementById('btnSearchRoute').addEventListener('click', searchRoute);
   document.getElementById('btnSaveRoute').addEventListener('click', toggleRouteFavorite);
+
+  // Pulsanti Oggi / Domani
+  const p2 = n => String(n).padStart(2, '0');
+  document.getElementById('btnOggi').addEventListener('click', () => {
+    const now = new Date();
+    document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
+    document.getElementById('routeTime').value = `${p2(now.getHours())}:${p2(now.getMinutes())}`;
+    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btnOggi').classList.add('active');
+    searchRoute();
+  });
+  document.getElementById('btnDomani').addEventListener('click', () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    document.getElementById('routeDate').value = toLocalIso(tomorrow).slice(0, 10);
+    document.getElementById('routeTime').value = '06:00';
+    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btnDomani').classList.add('active');
+    searchRoute();
+  });
+  document.getElementById('routeDate').addEventListener('input', () => {
+    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
+  });
 }
 
 /** Configura l'autocomplete per un campo stazione nell'itinerario. */
@@ -121,11 +144,12 @@ async function searchRoute() {
     </div>`;
 
   try {
-    const windows = buildTimeWindows(date0);
+    const windows     = buildTimeWindows(date0);
+    const arrWindows  = buildArrivalWindows(date0);
 
     const [depResults, arrResults] = await Promise.all([
-      Promise.all(windows.map(ts => getDepartures(routeFrom.id, null, ts).catch(() => []))),
-      Promise.all(windows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
+      Promise.all(windows.map(ts    => getDepartures(routeFrom.id, null, ts).catch(() => []))),
+      Promise.all(arrWindows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
     ]);
 
     // Deduplica partenze per chiave completa
@@ -231,11 +255,12 @@ async function loadMoreRoute(direction, anchorTs) {
       ? new Date(anchorTs - 3 * 60 * 60 * 1000)
       : new Date(anchorTs);
 
-    const windows = buildTimeWindows(baseDate);
+    const windows    = buildTimeWindows(baseDate);
+    const arrWindows = buildArrivalWindows(baseDate);
 
     const [depResults, arrResults] = await Promise.all([
-      Promise.all(windows.map(ts => getDepartures(routeFrom.id, null, ts).catch(() => []))),
-      Promise.all(windows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
+      Promise.all(windows.map(ts    => getDepartures(routeFrom.id, null, ts).catch(() => []))),
+      Promise.all(arrWindows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => []))),
     ]);
 
     const depMap = new Map();
