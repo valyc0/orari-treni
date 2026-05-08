@@ -158,6 +158,8 @@ async function fetchAndRenderTrains(silent = false) {
 
     if (firstTs) document.getElementById('btnLoadPrevTrains').onclick = () => loadMoreTrains('prev', firstTs);
     if (lastTs)  document.getElementById('btnLoadNextTrains').onclick = () => loadMoreTrains('next', lastTs);
+    const cardList = document.getElementById('trainsCardList');
+    if (cardList) attachRouteCardCountdowns(cardList);
 
     const nowStr = formatTime(new Date());
     const lbl = document.getElementById('lastUpdateLabel');
@@ -224,6 +226,7 @@ async function loadMoreTrains(direction, anchorTs) {
       btnEl.innerHTML = origHTML;
       btnEl.onclick = () => loadMoreTrains('next', newLastTs);
     }
+    attachRouteCardCountdowns(cardListEl);
   } catch {
     btnEl.disabled = false;
     btnEl.innerHTML = origHTML;
@@ -243,12 +246,14 @@ function renderTrainsList(trains) {
 function renderTrainCard(t) {
   const isDep = activeTab === 'partenze';
 
-  const timeMs  = isDep ? t.orarioPartenza : t.orarioArrivo;
-  const timeStr = timeMs
+  const timeMs   = isDep ? t.orarioPartenza : t.orarioArrivo;
+  const timeStr  = timeMs
     ? formatTime(new Date(timeMs))
     : (isDep ? t.compOrarioPartenza : t.compOrarioArrivo) || '--:--';
   const timeLabel = isDep ? 'Partenza' : 'Arrivo';
   const dest      = isDep ? (t.destinazione || '—') : (t.origine || '—');
+  const numLabel  = (t.compNumeroTreno || String(t.numeroTreno || '')).trim();
+  const isPast    = timeMs && timeMs < Date.now();
 
   const platEff    = isDep ? t.binarioEffettivoPartenzaDescrizione : t.binarioEffettivoArrivoDescrizione;
   const platProg   = isDep ? t.binarioProgrammatoPartenzaDescrizione : t.binarioProgrammatoArrivoDescrizione;
@@ -257,6 +262,7 @@ function renderTrainCard(t) {
 
   const cat = (t.categoriaDescrizione || t.categoria || '').trim().toUpperCase() || 'REG';
   const [catBg, catTx] = getCatColors(cat);
+  const trainLabel = `${cat} ${numLabel}`.trim();
 
   const delay = t.ritardo || 0;
   let delayBadge;
@@ -281,13 +287,24 @@ function renderTrainCard(t) {
     platHTML = `<div class="mt-2"><small class="text-muted fst-italic">Binario non disponibile</small></div>`;
   }
 
+  const stationName = (station && station.name) ? station.name : '';
+  const otherName   = isDep ? (t.destinazione || '') : (t.origine || '');
+
   return `
-  <div class="card mb-2 border-0 shadow-sm">
+  <div class="card mb-2 border-0 shadow-sm solution-card${isPast ? ' opacity-50' : ''}"
+       style="${isPast ? 'filter:grayscale(.75)' : ''}"
+       data-dep-ts="${timeMs || ''}"
+       data-train-label="${esc(trainLabel)}"
+       data-train-num="${esc(String(t.numeroTreno || ''))}"
+       data-train-date="${esc(String(t.dataPartenzaTreno || ''))}"
+       data-cod-origine="${esc(t.codOrigine || '')}"
+       data-route-from="${esc(isDep ? stationName : otherName)}"
+       data-route-to="${esc(isDep ? otherName : stationName)}">
     <div class="card-body p-3">
       <div class="d-flex justify-content-between align-items-start mb-2">
         <div class="d-flex align-items-center gap-2 flex-wrap me-2">
           <span class="badge ${catBg} ${catTx}">${esc(cat)}</span>
-          <span class="text-muted small fw-semibold">${esc((t.compNumeroTreno || String(t.numeroTreno || '')).trim())}</span>
+          <span class="text-muted small fw-semibold">${esc(numLabel)}</span>
           ${statusBadge}
         </div>
         ${delayBadge}
@@ -300,6 +317,18 @@ function renderTrainCard(t) {
         </div>
       </div>
       ${platHTML}
+      <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
+        <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">${timeLabel} tra</small>
+        <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="d-flex gap-2 justify-content-center mt-1">
+          <button class="btn btn-sm btn-success cd-notif-btn">
+            <i class="bi bi-bell me-1"></i>Attiva allarme
+          </button>
+          <button class="btn btn-sm btn-outline-primary cd-tratta-btn">
+            <i class="bi bi-map me-1"></i>Dettaglio tratta
+          </button>
+        </div>
+      </div>
     </div>
   </div>`;
 }
