@@ -102,12 +102,16 @@ async function searchRouteWithConnections(date0) {
     }
   }
 
-  // Ordina per orario di partenza e deduplica per coppia di treni
-  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime);
+  // Ordina per orario di partenza, poi per durata totale (migliore prima)
+  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime || a.totalMin - b.totalMin);
   const seen = new Set();
   const direct = connections.filter(c => {
     if (seen.has(c.key)) return false;
     seen.add(c.key);
+    // Deduplicazione per leg1: stesso treno di partenza → tieni solo la prima soluzione
+    const leg1Key = String(c.leg1.train.numeroTreno);
+    if (seen.has('leg1:' + leg1Key)) return false;
+    seen.add('leg1:' + leg1Key);
     return true;
   });
 
@@ -220,11 +224,15 @@ async function searchRouteHubFallback(date0, depMap, arrMap) {
     }
   }
 
-  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime);
+  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime || a.totalMin - b.totalMin);
   const seen2 = new Set();
   return connections.filter(c => {
     if (seen2.has(c.key)) return false;
     seen2.add(c.key);
+    // Deduplicazione per leg1: stesso treno di partenza → tieni solo la prima soluzione
+    const leg1Key = String(c.leg1.train.numeroTreno);
+    if (seen2.has('leg1:' + leg1Key)) return false;
+    seen2.add('leg1:' + leg1Key);
     return true;
   });
 }
