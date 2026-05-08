@@ -26,12 +26,14 @@ function loadOrari() {
     fetchAndRenderTrains();
   });
 
-  setupTimeChips('orariDate', 'orariTime', '.orari-time-btn', () => {
+  const _orariOnChange = () => {
     const dateVal = document.getElementById('orariDate').value;
     const timeVal = document.getElementById('orariTime').value;
     chosenDate = dateVal ? new Date(`${dateVal}T${timeVal || '00:00'}`) : null;
     fetchAndRenderTrains();
-  });
+  };
+  setupTimeChips('orariDate', 'orariTime', '.orari-time-btn', _orariOnChange, '.orari-date-btn');
+  setupDateBtns('orariDate', 'orariTime', '.orari-date-btn', _orariOnChange, '.orari-time-btn');
 
   document.getElementById('autoRefreshToggle').addEventListener('change', e => {
     autoRefresh = e.target.checked;
@@ -82,6 +84,7 @@ function renderDatetimeBar(d) {
       <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="13">Pomeriggio</button>
       <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="18">Sera</button>
       <button class="btn btn-sm btn-outline-secondary orari-time-btn" data-hour="21">Notte</button>
+      <button class="btn btn-sm btn-outline-secondary orari-date-btn" data-day="domani">Domani</button>
       <input type="time" class="form-control form-control-sm ms-auto" id="orariTime"
              style="max-width:100px" value="${timeStr}">
     </div>

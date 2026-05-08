@@ -85,11 +85,15 @@ function renderAcItem(s) {
  * @param {string}   chipSel  - selettore CSS dei bottoni chip
  * @param {Function} onChange - callback chiamata dopo ogni selezione
  */
-function setupTimeChips(dateId, timeId, chipSel, onChange) {
+function setupTimeChips(dateId, timeId, chipSel, onChange, crossClearSel) {
   const p = n => String(n).padStart(2, '0');
   document.querySelectorAll(chipSel).forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll(chipSel).forEach(b => b.classList.remove('active'));
+      // Cancella il date-btn solo se "Adesso" (cambia anche la data a oggi)
+      if (crossClearSel && btn.dataset.hour === 'now') {
+        document.querySelectorAll(crossClearSel).forEach(b => b.classList.remove('active'));
+      }
       btn.classList.add('active');
       const h = btn.dataset.hour;
       if (h === 'now') {
@@ -105,5 +109,39 @@ function setupTimeChips(dateId, timeId, chipSel, onChange) {
   // Deseleziona i chip quando l'utente modifica l'orario manualmente
   document.getElementById(timeId).addEventListener('input', () => {
     document.querySelectorAll(chipSel).forEach(b => b.classList.remove('active'));
+  });
+}
+
+/**
+ * Imposta i pulsanti data rapida (Oggi / Domani) condivisi tra le pagine.
+ * @param {string}   dateId   - id dell'input date
+ * @param {string}   timeId   - id dell'input time
+ * @param {string}   dateBtnSel - selettore CSS dei bottoni data
+ * @param {Function} onChange - callback chiamata dopo ogni selezione
+ */
+function setupDateBtns(dateId, timeId, dateBtnSel, onChange, crossClearSel) {
+  const p = n => String(n).padStart(2, '0');
+  document.querySelectorAll(dateBtnSel).forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll(dateBtnSel).forEach(b => b.classList.remove('active'));
+      if (crossClearSel) document.querySelectorAll(crossClearSel).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const which = btn.dataset.day;
+      const d = new Date();
+      if (which === 'domani') {
+        d.setDate(d.getDate() + 1);
+        document.getElementById(dateId).value = toLocalIso(d).slice(0, 10);
+        document.getElementById(timeId).value = '06:00';
+      } else {
+        // oggi
+        document.getElementById(dateId).value = toLocalIso(d).slice(0, 10);
+        document.getElementById(timeId).value = `${p(d.getHours())}:${p(d.getMinutes())}`;
+      }
+      if (onChange) onChange();
+    });
+  });
+  // Deseleziona quando l'utente cambia la data manualmente
+  document.getElementById(dateId).addEventListener('input', () => {
+    document.querySelectorAll(dateBtnSel).forEach(b => b.classList.remove('active'));
   });
 }

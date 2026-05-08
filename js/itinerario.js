@@ -14,7 +14,7 @@ function initItinerario() {
   document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
   document.getElementById('routeTime').value = `${p(now.getHours())}:${p(now.getMinutes())}`;
 
-  setupTimeChips('routeDate', 'routeTime', '.route-time-btn', searchRoute);
+  setupTimeChips('routeDate', 'routeTime', '.route-time-btn', searchRoute, '.route-date-btn');
 
   // Autocomplete Da / A
   setupRouteAc(
@@ -43,28 +43,7 @@ function initItinerario() {
   document.getElementById('btnSearchRoute').addEventListener('click', searchRoute);
   document.getElementById('btnSaveRoute').addEventListener('click', toggleRouteFavorite);
 
-  // Pulsanti Oggi / Domani
-  const p2 = n => String(n).padStart(2, '0');
-  document.getElementById('btnOggi').addEventListener('click', () => {
-    const now = new Date();
-    document.getElementById('routeDate').value = toLocalIso(now).slice(0, 10);
-    document.getElementById('routeTime').value = `${p2(now.getHours())}:${p2(now.getMinutes())}`;
-    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('btnOggi').classList.add('active');
-    searchRoute();
-  });
-  document.getElementById('btnDomani').addEventListener('click', () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('routeDate').value = toLocalIso(tomorrow).slice(0, 10);
-    document.getElementById('routeTime').value = '06:00';
-    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('btnDomani').classList.add('active');
-    searchRoute();
-  });
-  document.getElementById('routeDate').addEventListener('input', () => {
-    document.querySelectorAll('.route-date-btn').forEach(b => b.classList.remove('active'));
-  });
+  setupDateBtns('routeDate', 'routeTime', '.route-date-btn', searchRoute, '.route-time-btn');
 }
 
 /** Configura l'autocomplete per un campo stazione nell'itinerario. */
