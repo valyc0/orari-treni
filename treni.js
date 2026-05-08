@@ -1778,6 +1778,17 @@ function renderFermateWithConnection(data1, data2, fromName, transferName, toNam
               <span class="${nameCls}" style="font-size:.9rem">${esc(f.stazione || '')}</span>
               <span class="ms-2 flex-shrink-0" style="font-size:.9rem">${oraStr}${oraRealStr ? ` <span class="text-muted" style="font-size:.75rem">(${oraRealStr})</span>` : ''}</span>
             </div>
+            ${(isFrom || isTo || isCurrent) ? (() => {
+              const binEff  = isFrom ? (f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione)
+                                     : (f.binarioEffettivoArrivoDescrizione   || f.binarioProgrammatoArrivoDescrizione);
+              const binProg = isFrom ? f.binarioProgrammatoPartenzaDescrizione : f.binarioProgrammatoArrivoDescrizione;
+              const changed = binEff && binProg && binEff !== binProg;
+              return binEff ? `<div class="d-flex align-items-center gap-1 mt-1">
+                <small class="text-muted">Bin.</small>
+                <span class="badge ${changed ? 'bg-warning text-dark' : (isFrom ? 'bg-primary' : 'bg-danger')} platform-num">${esc(binEff)}</span>
+                ${changed ? `<small class="text-muted fst-italic">var. da ${esc(binProg)}</small>` : ''}
+              </div>` : '';
+            })() : ''}
             ${ritBadge}
             ${isCurrent ? `<div class="text-primary" style="font-size:.72rem"><i class="bi bi-train-front-fill me-1"></i>Qui ora</div>` : ''}
           </div>
@@ -1909,6 +1920,8 @@ async function searchRouteWithConnections(date0) {
             arrTime:     cand.arrTime,
             depTime:     depTime,
             waitMin:     Math.round((depTime - cand.arrTime) / 60000),
+            binEff:  f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione || null,
+            binProg: f.binarioProgrammatoPartenzaDescrizione || null,
           },
           leg2:     { train: arrTrain, arrTime: arrAtB },
           totalMin: Math.round((arrAtB - depFromA) / 60000),
@@ -1941,6 +1954,29 @@ function renderConnectionCard(c) {
   const transDep = formatTime(new Date(transfer.depTime));
   const durStr = totalMin < 60 ? `${totalMin} min` : `${Math.floor(totalMin/60)}h ${totalMin%60}m`;
   const trainLabel = `${cat1} ${num1} + ${cat2} ${num2} → ${routeTo.name}`.trim();
+
+  // Binario partenza leg1 (da /partenze)
+  const binDep1 = leg1.train.binarioEffettivoPartenzaDescrizione || leg1.train.binarioProgrammatoPartenzaDescrizione;
+  const binDep1Changed = leg1.train.binarioEffettivoPartenzaDescrizione && leg1.train.binarioProgrammatoPartenzaDescrizione &&
+                         leg1.train.binarioEffettivoPartenzaDescrizione !== leg1.train.binarioProgrammatoPartenzaDescrizione;
+  const binDep1Html = binDep1 ? `
+    <div class="d-flex align-items-center gap-1 mt-1">
+      <small class="text-muted">Bin.</small>
+      <span class="badge ${binDep1Changed ? 'bg-warning text-dark' : 'bg-primary'} platform-num">${esc(binDep1)}</span>
+      ${binDep1Changed ? `<small class="text-muted fst-italic">var.</small>` : ''}
+    </div>` : '';
+
+  // Binario arrivo leg2 (da /arrivi)
+  const binArr2 = leg2.train.binarioEffettivoArrivoDescrizione || leg2.train.binarioProgrammatoArrivoDescrizione;
+  const binArr2Changed = leg2.train.binarioEffettivoArrivoDescrizione && leg2.train.binarioProgrammatoArrivoDescrizione &&
+                         leg2.train.binarioEffettivoArrivoDescrizione !== leg2.train.binarioProgrammatoArrivoDescrizione;
+  const binArr2Html = binArr2 ? `
+    <div class="d-flex align-items-center gap-1 mt-1">
+      <small class="text-muted">Bin.</small>
+      <span class="badge ${binArr2Changed ? 'bg-warning text-dark' : 'bg-danger'} platform-num">${esc(binArr2)}</span>
+      ${binArr2Changed ? `<small class="text-muted fst-italic">var.</small>` : ''}
+    </div>` : '';
+
   return `
   <div class="card border-0 shadow-sm mb-3 solution-card connection-card"
        data-dep-ts="${leg1.depTime || ''}"
@@ -1976,6 +2012,7 @@ function renderConnectionCard(c) {
                 <span class="badge ${bg1} ${tx1}">${esc(cat1)}</span>
                 <span class="text-muted small">${esc(num1)}</span>
               </div>
+              ${binDep1Html}
             </div>
             <div class="fw-bold text-primary ms-3" style="font-size:1.4rem;line-height:1">${depTime}</div>
           </div>
@@ -1991,13 +2028,21 @@ function renderConnectionCard(c) {
               <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
                 <span class="badge ${bg2} ${tx2}">${esc(cat2)}</span>
                 <span class="text-muted small">${esc(num2)}</span>
+                ${(() => {
+                  if (!transfer.binEff) return '';
+                  const changed = transfer.binProg && transfer.binEff !== transfer.binProg;
+                  return `<span class="badge ${changed ? 'bg-warning text-dark' : 'bg-primary'} platform-num">Bin. ${esc(transfer.binEff)}</span>${changed ? `<small class="text-muted fst-italic">var. da ${esc(transfer.binProg)}</small>` : ''}`;
+                })()}
               </div>
             </div>
           </div>
           <hr class="my-2">
           <!-- arrivo -->
           <div class="d-flex justify-content-between align-items-start">
-            <div class="fw-bold">${esc(routeTo.name)}</div>
+            <div>
+              <div class="fw-bold">${esc(routeTo.name)}</div>
+              ${binArr2Html}
+            </div>
             <div class="fw-bold text-danger ms-3" style="font-size:1.4rem;line-height:1">${arrTime}</div>
           </div>
         </div>
