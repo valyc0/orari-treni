@@ -101,6 +101,9 @@ async function getArrivals(stId, date, rawTs) {
   const ts = rawTs || viTimestamp(date);
   return apiJson('/arrivi/'   + stId + '/' + encodeURIComponent(ts));
 }
+async function getTrainDetails(codOrigine, numeroTreno, dataPartenzaTreno) {
+  return apiJson(`/andamentoTreno/${codOrigine}/${numeroTreno}/${dataPartenzaTreno}`);
+}
 
 /* ═══════════════════════════════════════════════
    PAGE NAVIGATION
@@ -971,22 +974,25 @@ async function searchRoute() {
       ))
     ]);
 
-    // Deduplica per numeroTreno (tenendo il primo trovato)
+    // Deduplica le partenze per chiave completa (evita duplicati tra finestre orarie)
     const depMap = new Map();
     depResults.flat().forEach(t => {
-      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
+      if (!t.numeroTreno) return;
+      const key = String(t.numeroTreno) + '|' + (t.dataPartenzaTreno ?? '');
       if (!depMap.has(key)) depMap.set(key, t);
     });
-    const arrMap = new Map();
+    // Arrivi: mappa per solo numeroTreno – dataPartenzaTreno può differire tra /partenze e /arrivi
+    const arrByNum = new Map();
     arrResults.flat().forEach(t => {
-      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
-      if (!arrMap.has(key)) arrMap.set(key, t);
+      if (!t.numeroTreno) return;
+      const numKey = String(t.numeroTreno);
+      if (!arrByNum.has(numKey)) arrByNum.set(numKey, t);
     });
 
     // Incrocia: un treno valido parte da A e arriva a B (orarioPartenza < orarioArrivo)
     const matches = [];
-    depMap.forEach((dep, key) => {
-      const arr = arrMap.get(key);
+    depMap.forEach((dep) => {
+      const arr = arrByNum.get(String(dep.numeroTreno));
       if (!arr) return;
       const tDep = dep.orarioPartenza || dep.orarioPartenzaZero;
       const tArr = arr.orarioArrivo  || arr.orarioArrivoZero;
@@ -1002,12 +1008,34 @@ async function searchRoute() {
     );
 
     if (!matches.length) {
+      // Nessun treno diretto: prova con una coincidenza
       resEl.innerHTML = `
-        <div class="text-center text-muted py-5">
-          <i class="bi bi-map" style="font-size:3rem;opacity:.25"></i>
-          <h6 class="mt-3 fw-semibold">Nessun treno trovato</h6>
-          <p class="small mb-0">Prova a cambiare data o orario</p>
+        <div class="d-flex flex-column align-items-center justify-content-center py-4 text-muted">
+          <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+          <small>Nessun treno diretto — cerco coincidenze…</small>
         </div>`;
+      let connections = [];
+      try {
+        connections = await searchRouteWithConnections(date0);
+      } catch (err) { console.error('searchRouteWithConnections error:', err); }
+      if (!connections.length) {
+        resEl.innerHTML = `
+          <div class="text-center text-muted py-5">
+            <i class="bi bi-map" style="font-size:3rem;opacity:.25"></i>
+            <h6 class="mt-3 fw-semibold">Nessun treno trovato</h6>
+            <p class="small mb-0">Prova a cambiare data o orario</p>
+          </div>`;
+        return;
+      }
+      resEl.innerHTML = `
+        <div class="px-3 py-2">
+          <small class="text-muted fw-semibold">
+            ${esc(routeFrom.name)} → ${esc(routeTo.name)}
+            &nbsp;•&nbsp; ${connections.length} soluzione${connections.length === 1 ? '' : 'i'} con coincidenza
+          </small>
+        </div>
+        <div class="px-3 pb-3">${connections.map(renderConnectionCard).join('')}</div>`;
+      attachRouteCardCountdowns(resEl);
       return;
     }
 
@@ -1185,19 +1213,22 @@ async function loadMoreRoute(direction, anchorTs) {
 
     const depMap = new Map();
     depResults.flat().forEach(t => {
-      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
+      if (!t.numeroTreno) return;
+      const key = String(t.numeroTreno) + '|' + (t.dataPartenzaTreno ?? '');
       if (!depMap.has(key)) depMap.set(key, t);
     });
-    const arrMap = new Map();
+    // Arrivi: mappa per solo numeroTreno – dataPartenzaTreno può differire tra /partenze e /arrivi
+    const arrByNum = new Map();
     arrResults.flat().forEach(t => {
-      const key = t.numeroTreno + '|' + t.dataPartenzaTreno;
-      if (!arrMap.has(key)) arrMap.set(key, t);
+      if (!t.numeroTreno) return;
+      const numKey = String(t.numeroTreno);
+      if (!arrByNum.has(numKey)) arrByNum.set(numKey, t);
     });
 
     const newMatches = [];
     depMap.forEach((dep, key) => {
       if (_shownRouteKeys.has(key)) return;
-      const arr = arrMap.get(key);
+      const arr = arrByNum.get(String(dep.numeroTreno));
       if (!arr) return;
       const tDep = dep.orarioPartenza || dep.orarioPartenzaZero;
       const tArr = arr.orarioArrivo  || arr.orarioArrivoZero;
@@ -1427,6 +1458,11 @@ async function loadTratta(card) {
   const fromName   = card.dataset.routeFrom || '';
   const toName     = card.dataset.routeTo   || '';
   const depTs      = parseInt(card.dataset.depTs, 10) || 0;
+  // Dati secondo treno (coincidenza)
+  const trainNum2   = card.dataset.train2Num   || '';
+  const trainDate2  = card.dataset.train2Date  || '';
+  const codOrigine2 = card.dataset.codOrigine2 || '';
+  const transferSt  = card.dataset.transferStation || '';
   const body       = document.getElementById('trattaModalBody');
   if (!trainNum) {
     body.innerHTML = `<p class="text-center text-muted py-4">Dati treno non disponibili</p>`;
@@ -1444,9 +1480,18 @@ async function loadTratta(card) {
   }
 
   try {
-    const path = `/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`;
-    const data = await apiJson(path);
-    body.innerHTML = renderFermate(data, fromName, toName, depTs);
+    if (trainNum2 && codOrigine2 && trainDate2) {
+      // Coincidenza: carica entrambi i treni in parallelo
+      const [data1, data2] = await Promise.all([
+        apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`),
+        apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine2)}/${encodeURIComponent(trainNum2)}/${encodeURIComponent(trainDate2)}`),
+      ]);
+      body.innerHTML = renderFermateWithConnection(data1, data2, fromName, transferSt, toName, depTs);
+    } else {
+      const path = `/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`;
+      const data = await apiJson(path);
+      body.innerHTML = renderFermate(data, fromName, toName, depTs);
+    }
     // Ripristina il countdown senza resettare il timer
   } catch {
     body.innerHTML = `
@@ -1622,6 +1667,355 @@ function renderFermate(data, fromName, toName, depTs) {
   });
   html += '</div>';
   return html;
+}
+
+function renderFermateWithConnection(data1, data2, fromName, transferName, toName, depTs) {
+  // Renderizza le fermate di entrambi i treni con un separatore visivo di cambio
+  const cat1 = (data1.categoria || '').trim().toUpperCase() || 'REG';
+  const cat2 = (data2.categoria || '').trim().toUpperCase() || 'REG';
+  const [bg1, tx1] = getCatColors(cat1);
+  const [bg2, tx2] = getCatColors(cat2);
+  const num1 = data1.numeroTreno || '';
+  const num2 = data2.numeroTreno || '';
+
+  // Taglia leg1: dalla stazione di partenza itinerario fino alla stazione di coincidenza (inclusa)
+  const fermate1 = data1.fermate || [];
+  const norm = s => (s || '').trim().toLowerCase();
+  const fromNorm = norm(fromName);
+  const transNorm = norm(transferName);
+  const fromIdx1 = fermate1.findIndex(f => norm(f.stazione).includes(fromNorm) || fromNorm.includes(norm(f.stazione)));
+  const transIdx1 = fermate1.findIndex(f => norm(f.stazione).includes(transNorm) || transNorm.includes(norm(f.stazione)));
+  const slice1 = fermate1.slice(
+    fromIdx1 >= 0 ? fromIdx1 : 0,
+    transIdx1 >= 0 ? transIdx1 + 1 : fermate1.length
+  );
+
+  // Taglia leg2: dalla stazione di coincidenza fino alla stazione di arrivo itinerario (inclusa)
+  const fermate2 = data2.fermate || [];
+  const toNorm = norm(toName);
+  const transIdx2 = fermate2.findIndex(f => norm(f.stazione).includes(transNorm) || transNorm.includes(norm(f.stazione)));
+  const toIdx2 = fermate2.findIndex(f => norm(f.stazione).includes(toNorm) || toNorm.includes(norm(f.stazione)));
+  const slice2 = fermate2.slice(
+    transIdx2 >= 0 ? transIdx2 : 0,
+    toIdx2 >= 0 ? toIdx2 + 1 : fermate2.length
+  );
+
+  const ritardo1 = data1.ritardo || 0;
+  const ritardo2 = data2.ritardo || 0;
+  const now = Date.now();
+  const delayMs1 = ritardo1 * 60000;
+  const delayMs2 = ritardo2 * 60000;
+
+  // Calcola lastPassedIdx per ogni treno
+  function calcLastPassed(fermate, delayMs) {
+    let idx = -1;
+    fermate.forEach((f, i) => {
+      if (f.actualFermataType === 1 || f.actualFermataType === 2 || f.effettiva || f.arrivoReale || f.partenzaReale) idx = i;
+    });
+    fermate.forEach((f, i) => {
+      if (i <= idx) return;
+      const oraProg = f.programmata || f.arrivo_teorico || f.partenza_teorica;
+      if (oraProg && (oraProg + delayMs) < now) idx = i;
+    });
+    return idx;
+  }
+  const lastPassed1 = calcLastPassed(slice1, delayMs1);
+  const lastPassed2 = calcLastPassed(slice2, delayMs2);
+
+  function renderLegStops(fermate, lastPassedIdx, startName, endName, isLast, delayMs) {
+    const ritardo = Math.round(delayMs / 60000);
+    let html = '';
+    fermate.forEach((f, i) => {
+      const isPassed  = i < lastPassedIdx;
+      const isCurrent = i === lastPassedIdx;
+      const isFirst   = i === 0;
+      const isEnd     = i === fermate.length - 1;
+
+      const normSt = norm(f.stazione);
+      const normStart = norm(startName);
+      const normEnd   = norm(endName);
+      const isFrom = normSt.includes(normStart) || normStart.includes(normSt);
+      const isTo   = normSt.includes(normEnd)   || normEnd.includes(normSt);
+      const inRoute = !isFrom && !isTo;
+
+      const oraProg = f.arrivo_teorico || f.programmata;
+      const oraReal = f.effettiva || f.arrivoReale || f.partenzaReale;
+      const oraStr  = oraProg ? formatTime(new Date(oraProg)) : '--:--';
+      const oraRealStr = oraReal && oraReal !== oraProg ? formatTime(new Date(oraReal)) : null;
+
+      const fRit = f.ritardo || ritardo || 0;
+      let ritBadge = '';
+      if ((isCurrent || isPassed) && fRit > 0) {
+        ritBadge = fRit > 5
+          ? `<span class="badge bg-danger ms-1">+${fRit}'</span>`
+          : `<span class="badge bg-warning text-dark ms-1">+${fRit}'</span>`;
+      }
+
+      let dotColor, dotSize;
+      if (isFrom || isTo) { dotColor = isFrom ? '#1a56db' : '#dc3545'; dotSize = 14; }
+      else { dotColor = isPassed ? '#6c757d' : '#1a56db'; dotSize = 8; }
+      if (isCurrent) { dotColor = '#1a56db'; dotSize = 14; }
+
+      const lineColor = isPassed ? '#6c757d' : '#1a56db';
+      const dotOutline = isCurrent ? ';outline:3px solid rgba(26,86,219,.3)' : '';
+
+      let nameCls = isPassed ? 'text-muted' : (isFrom || isTo ? `fw-bold ${isFrom ? 'text-primary' : 'text-danger'}` : 'fw-semibold');
+      if (isCurrent) nameCls = 'fw-bold text-primary';
+
+      let rowBg = '';
+      if (isFrom) rowBg = 'background:rgba(26,86,219,.06);border-radius:6px;padding:2px 4px;';
+      else if (isTo) rowBg = 'background:rgba(220,53,69,.06);border-radius:6px;padding:2px 4px;';
+
+      const showLine = !(isEnd && isLast);
+      html += `
+        <div class="d-flex gap-2 align-items-stretch" style="min-height:${showLine?'48px':'auto'}">
+          <div class="d-flex flex-column align-items-center flex-shrink-0" style="width:18px;padding-top:4px">
+            <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${dotColor};flex-shrink:0${dotOutline}"></div>
+            ${showLine ? `<div style="width:3px;flex:1;background:${lineColor};border-radius:2px;margin-top:3px"></div>` : ''}
+          </div>
+          <div class="flex-grow-1 pb-2" style="${rowBg}">
+            <div class="d-flex justify-content-between align-items-start">
+              <span class="${nameCls}" style="font-size:.9rem">${esc(f.stazione || '')}</span>
+              <span class="ms-2 flex-shrink-0" style="font-size:.9rem">${oraStr}${oraRealStr ? ` <span class="text-muted" style="font-size:.75rem">(${oraRealStr})</span>` : ''}</span>
+            </div>
+            ${ritBadge}
+            ${isCurrent ? `<div class="text-primary" style="font-size:.72rem"><i class="bi bi-train-front-fill me-1"></i>Qui ora</div>` : ''}
+          </div>
+        </div>`;
+    });
+    return html;
+  }
+
+  let html = '';
+
+  // Intestazione treno 1
+  html += `<div class="px-3 pt-2 pb-1 border-bottom" style="background:rgba(26,86,219,.04)">
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge ${bg1} ${tx1}">${esc(cat1)}</span>
+      <span class="fw-semibold small">${esc(String(num1))}</span>
+      ${ritardo1 > 0 ? `<span class="badge bg-${ritardo1 > 5 ? 'danger' : 'warning'} ${ritardo1 > 5 ? '' : 'text-dark'} ms-auto">+${ritardo1} min</span>` : '<span class="badge bg-success ms-auto">Puntuale</span>'}
+    </div>
+  </div>`;
+  html += `<div class="px-3 pt-2">${renderLegStops(slice1, lastPassed1, fromName, transferName, false, delayMs1)}</div>`;
+
+  // Separatore cambio
+  html += `
+  <div class="mx-3 my-2 rounded-3 border border-warning d-flex align-items-center gap-2 px-3 py-2" style="background:#fffbeb">
+    <i class="bi bi-arrow-repeat text-warning fs-5"></i>
+    <div>
+      <div class="fw-bold small">Cambio a ${esc(transferName)}</div>
+      <div class="text-muted" style="font-size:.75rem">Prosegui con ${esc(cat2)} ${esc(String(num2))}</div>
+    </div>
+  </div>`;
+
+  // Intestazione treno 2
+  html += `<div class="px-3 pt-1 pb-1 border-bottom" style="background:rgba(26,86,219,.04)">
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge ${bg2} ${tx2}">${esc(cat2)}</span>
+      <span class="fw-semibold small">${esc(String(num2))}</span>
+      ${ritardo2 > 0 ? `<span class="badge bg-${ritardo2 > 5 ? 'danger' : 'warning'} ${ritardo2 > 5 ? '' : 'text-dark'} ms-auto">+${ritardo2} min</span>` : '<span class="badge bg-success ms-auto">Puntuale</span>'}
+    </div>
+  </div>`;
+  html += `<div class="px-3 pt-2 pb-3">${renderLegStops(slice2, lastPassed2, transferName, toName, true, delayMs2)}</div>`;
+
+  return html;
+}
+
+/* ═══════════════════════════════════════════════
+   RICERCA CON COINCIDENZE (andamentoTreno)
+═══════════════════════════════════════════════ */
+async function searchRouteWithConnections(date0) {
+  const windows = [0, 60, 120].map(delta => {
+    const d = new Date(date0.getTime() + delta * 60000);
+    return viTimestamp(d);
+  });
+
+  const [depResults, arrResults] = await Promise.all([
+    Promise.all(windows.map(ts => getDepartures(routeFrom.id, null, ts).catch(() => []))),
+    Promise.all(windows.map(ts => getArrivals(routeTo.id, null, ts).catch(() => [])))
+  ]);
+
+  // Deduplica
+  const depMap = new Map();
+  depResults.flat().forEach(t => {
+    if (!t.numeroTreno || !t.codOrigine || !t.dataPartenzaTreno) return;
+    const key = String(t.numeroTreno);
+    if (!depMap.has(key)) depMap.set(key, t);
+  });
+  const arrMap = new Map();
+  arrResults.flat().forEach(t => {
+    if (!t.numeroTreno || !t.codOrigine || !t.dataPartenzaTreno) return;
+    const key = String(t.numeroTreno);
+    if (!arrMap.has(key)) arrMap.set(key, t);
+  });
+
+  if (!depMap.size || !arrMap.size) return [];
+
+  // Fetch andamentoTreno per tutti i treni in parallelo
+  const [depDetails, arrDetails] = await Promise.all([
+    Promise.all([...depMap.values()].map(t =>
+      getTrainDetails(t.codOrigine, t.numeroTreno, t.dataPartenzaTreno)
+        .then(d => ({ train: t, fermate: d.fermate || [] }))
+        .catch(() => ({ train: t, fermate: [] }))
+    )),
+    Promise.all([...arrMap.values()].map(t =>
+      getTrainDetails(t.codOrigine, t.numeroTreno, t.dataPartenzaTreno)
+        .then(d => ({ train: t, fermate: d.fermate || [] }))
+        .catch(() => ({ train: t, fermate: [] }))
+    ))
+  ]);
+
+  // Mappa: stopId → [{ train, fermata, arrTime }] per fermate DOPO routeFrom
+  const transferFromMap = new Map();
+  for (const { train, fermate } of depDetails) {
+    const fromIdx = fermate.findIndex(f => f.id === routeFrom.id);
+    if (fromIdx < 0) continue;
+    for (let i = fromIdx + 1; i < fermate.length; i++) {
+      const f = fermate[i];
+      if (!f.id) continue;
+      const arrTime = f.effettivaArrivo || f.programmataArrivo || f.arrivo_teorico || f.programmata;
+      if (!arrTime) continue;
+      if (!transferFromMap.has(f.id)) transferFromMap.set(f.id, []);
+      transferFromMap.get(f.id).push({ train, fermata: f, arrTime });
+    }
+  }
+
+  const MIN_TRANSFER_MS = 5 * 60 * 1000;
+  const connections = [];
+
+  for (const { train: arrTrain, fermate } of arrDetails) {
+    const toIdx = fermate.findIndex(f => f.id === routeTo.id);
+    if (toIdx <= 0) continue;
+    for (let i = 0; i < toIdx; i++) {
+      const f = fermate[i];
+      if (!f.id || !transferFromMap.has(f.id)) continue;
+      const depTime = f.effettivaPartenza || f.programmataPartenza || f.partenza_teorica || f.programmata;
+      if (!depTime) continue;
+
+      const candidates = transferFromMap.get(f.id).filter(c =>
+        c.arrTime + MIN_TRANSFER_MS <= depTime
+      );
+      for (const cand of candidates) {
+        const depFromA = cand.train.orarioPartenza || cand.train.orarioPartenzaZero;
+        const arrAtB   = arrTrain.orarioArrivo  || arrTrain.orarioArrivoZero;
+        if (!depFromA || !arrAtB) continue;
+        const key = `${cand.train.numeroTreno}→${arrTrain.numeroTreno}`;
+        connections.push({
+          key,
+          leg1:     { train: cand.train, depTime: depFromA },
+          transfer: {
+            stationId:   f.id,
+            stationName: f.stazione || cand.fermata.stazione,
+            arrTime:     cand.arrTime,
+            depTime:     depTime,
+            waitMin:     Math.round((depTime - cand.arrTime) / 60000),
+          },
+          leg2:     { train: arrTrain, arrTime: arrAtB },
+          totalMin: Math.round((arrAtB - depFromA) / 60000),
+        });
+      }
+    }
+  }
+
+  // Ordina per orario di partenza, deduplicato per stessa coppia di treni
+  connections.sort((a, b) => a.leg1.depTime - b.leg1.depTime);
+  const seen = new Set();
+  return connections.filter(c => {
+    if (seen.has(c.key)) return false;
+    seen.add(c.key);
+    return true;
+  });
+}
+
+function renderConnectionCard(c) {
+  const { leg1, transfer, leg2, totalMin } = c;
+  const cat1 = (leg1.train.categoriaDescrizione || leg1.train.categoria || '').trim().toUpperCase() || 'REG';
+  const cat2 = (leg2.train.categoriaDescrizione || leg2.train.categoria || '').trim().toUpperCase() || 'REG';
+  const [bg1, tx1] = getCatColors(cat1);
+  const [bg2, tx2] = getCatColors(cat2);
+  const num1 = (leg1.train.compNumeroTreno || String(leg1.train.numeroTreno || '')).trim();
+  const num2 = (leg2.train.compNumeroTreno || String(leg2.train.numeroTreno || '')).trim();
+  const depTime = formatTime(new Date(leg1.depTime));
+  const arrTime = formatTime(new Date(leg2.arrTime));
+  const transArr = formatTime(new Date(transfer.arrTime));
+  const transDep = formatTime(new Date(transfer.depTime));
+  const durStr = totalMin < 60 ? `${totalMin} min` : `${Math.floor(totalMin/60)}h ${totalMin%60}m`;
+  const trainLabel = `${cat1} ${num1} + ${cat2} ${num2} → ${routeTo.name}`.trim();
+  return `
+  <div class="card border-0 shadow-sm mb-3 solution-card connection-card"
+       data-dep-ts="${leg1.depTime || ''}"
+       data-train-label="${esc(trainLabel)}"
+       data-train-num="${esc(String(leg1.train.numeroTreno || ''))}"
+       data-train-date="${esc(String(leg1.train.dataPartenzaTreno || ''))}"
+       data-cod-origine="${esc(leg1.train.codOrigine || '')}"
+       data-train2-num="${esc(String(leg2.train.numeroTreno || ''))}"
+       data-train2-date="${esc(String(leg2.train.dataPartenzaTreno || ''))}"
+       data-cod-origine2="${esc(leg2.train.codOrigine || '')}"
+       data-transfer-station="${esc(transfer.stationName)}"
+       data-route-from="${esc(routeFrom.name)}"
+       data-route-to="${esc(routeTo.name)}">
+    <div class="card-body p-3">
+      <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+        <span class="badge bg-info text-white"><i class="bi bi-arrow-left-right me-1"></i>1 coincidenza</span>
+        <span class="badge bg-light text-secondary border ms-auto">${esc(durStr)}</span>
+      </div>
+      <div class="d-flex gap-3">
+        <div class="d-flex flex-column align-items-center flex-shrink-0" style="padding-top:4px">
+          <div class="sol-dot"></div>
+          <div class="sol-line flex-grow-1 my-1"></div>
+          <div class="sol-dot" style="background:#6c757d;width:10px;height:10px"></div>
+          <div class="sol-line flex-grow-1 my-1"></div>
+          <div class="sol-dot" style="background:#dc3545"></div>
+        </div>
+        <div class="flex-grow-1">
+          <!-- partenza -->
+          <div class="d-flex justify-content-between align-items-start mb-1">
+            <div>
+              <div class="fw-bold">${esc(routeFrom.name)}</div>
+              <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
+                <span class="badge ${bg1} ${tx1}">${esc(cat1)}</span>
+                <span class="text-muted small">${esc(num1)}</span>
+              </div>
+            </div>
+            <div class="fw-bold text-primary ms-3" style="font-size:1.4rem;line-height:1">${depTime}</div>
+          </div>
+          <hr class="my-2">
+          <!-- coincidenza -->
+          <div class="d-flex justify-content-between align-items-start mb-1">
+            <div>
+              <div class="fw-semibold text-secondary">${esc(transfer.stationName)}</div>
+              <div class="d-flex gap-2 align-items-center mt-1 flex-wrap">
+                <small class="text-muted">Arr. ${transArr} → Dep. ${transDep}</small>
+                <span class="badge bg-light text-secondary border" style="font-size:.7rem">att. ${transfer.waitMin} min</span>
+              </div>
+              <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
+                <span class="badge ${bg2} ${tx2}">${esc(cat2)}</span>
+                <span class="text-muted small">${esc(num2)}</span>
+              </div>
+            </div>
+          </div>
+          <hr class="my-2">
+          <!-- arrivo -->
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="fw-bold">${esc(routeTo.name)}</div>
+            <div class="fw-bold text-danger ms-3" style="font-size:1.4rem;line-height:1">${arrTime}</div>
+          </div>
+        </div>
+      </div>
+      <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
+        <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
+        <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="d-flex gap-2 justify-content-center mt-1">
+          <button class="btn btn-sm btn-success cd-notif-btn">
+            <i class="bi bi-bell me-1"></i>Attiva allarme
+          </button>
+          <button class="btn btn-sm btn-outline-primary cd-tratta-btn">
+            <i class="bi bi-map me-1"></i>Vedi tratta
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 /* ═══════════════════════════════════════════════
