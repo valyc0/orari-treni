@@ -439,6 +439,7 @@ async function buildChain4(chain, date0, MIN_TRANSFER_MS) {
         arrTime:     bestLeg1.arrTime,
         depTime:     bestLeg2.depTime,
         waitMin:     Math.round((bestLeg2.depTime - bestLeg1.arrTime) / 60000),
+        arrObj:      bestLeg1.arr,  // oggetto arrivo a hub1 → per binario arrivo
       },
       leg2:      { train: bestLeg2.dep },
       transfer2: {
@@ -447,6 +448,7 @@ async function buildChain4(chain, date0, MIN_TRANSFER_MS) {
         arrTime:     bestLeg2.arrTime,
         depTime:     leg3.depTime,
         waitMin:     Math.round((leg3.depTime - bestLeg2.arrTime) / 60000),
+        arrObj:      bestLeg2.arr,  // oggetto arrivo a hub2 → per binario arrivo
       },
       leg3:      { train: leg3.arr, arrTime: leg3.arrTime },
       totalMin:  Math.round((leg3.arrTime - bestLeg1.depTime) / 60000),
@@ -695,6 +697,26 @@ function renderConnection2Card(c) {
   const trainLabel = `${cat1} ${num1} + ${cat2} ${num2} + ${cat3} ${num3} → ${routeTo.name}`.trim();
   const isPast    = leg1.depTime && leg1.depTime < Date.now();
 
+  // ── Binari ──
+  function binBadge(t, type) {
+    const eff  = type === 'dep' ? t?.binarioEffettivoPartenzaDescrizione  : t?.binarioEffettivoArrivoDescrizione;
+    const prog = type === 'dep' ? t?.binarioProgrammatoPartenzaDescrizione : t?.binarioProgrammatoArrivoDescrizione;
+    const val  = eff || prog;
+    if (!val) return '';
+    const changed = eff && prog && eff !== prog;
+    const color   = changed ? 'bg-warning text-dark' : (type === 'dep' ? 'bg-primary' : 'bg-danger');
+    return `<div class="d-flex align-items-center gap-1 mt-1">
+      <small class="text-muted">Bin.</small>
+      <span class="badge ${color} platform-num">${esc(val)}</span>
+      ${changed ? `<small class="text-muted fst-italic">var.</small>` : ''}
+    </div>`;
+  }
+  const binDep1     = binBadge(leg1.train,        'dep'); // partenza da origin
+  const binArrHub1  = binBadge(transfer1.arrObj,  'arr'); // arrivo a hub1
+  const binDepHub1  = binBadge(leg2.train,        'dep'); // partenza da hub1
+  const binArrHub2  = binBadge(transfer2.arrObj,  'arr'); // arrivo a hub2
+  const binArr3     = binBadge(leg3.train,        'arr'); // arrivo a destination
+
   return `
   <div class="card border-0 shadow-sm mb-3 solution-card connection-card${isPast ? ' opacity-50' : ''}"
        style="${isPast ? 'filter:grayscale(.75)' : ''}"
@@ -733,6 +755,7 @@ function renderConnection2Card(c) {
                 <span class="badge ${bg1} ${tx1}">${esc(cat1)}</span>
                 <span class="text-muted small">${esc(num1)}</span>
               </div>
+              ${binDep1}
             </div>
             <div class="text-end ms-3 flex-shrink-0">
               <div class="fw-bold text-primary" style="font-size:1.4rem;line-height:1">${depTime}</div>
@@ -748,6 +771,7 @@ function renderConnection2Card(c) {
                 <small class="text-muted">Arr. ${t1Arr} → Dep. ${t1Dep}</small>
                 <span class="badge bg-light text-secondary border" style="font-size:.7rem">att. ${transfer1.waitMin} min</span>
               </div>
+              ${binArrHub1}${binDepHub1}
               <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
                 <span class="badge ${bg2} ${tx2}">${esc(cat2)}</span>
                 <span class="text-muted small">${esc(num2)}</span>
@@ -763,6 +787,7 @@ function renderConnection2Card(c) {
                 <small class="text-muted">Arr. ${t2Arr} → Dep. ${t2Dep}</small>
                 <span class="badge bg-light text-secondary border" style="font-size:.7rem">att. ${transfer2.waitMin} min</span>
               </div>
+              ${binArrHub2}
               <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
                 <span class="badge ${bg3} ${tx3}">${esc(cat3)}</span>
                 <span class="text-muted small">${esc(num3)}</span>
@@ -772,7 +797,10 @@ function renderConnection2Card(c) {
           <hr class="my-2">
           <!-- arrivo -->
           <div class="d-flex justify-content-between align-items-start">
-            <div><div class="fw-bold">${esc(routeTo.name)}</div></div>
+            <div>
+              <div class="fw-bold">${esc(routeTo.name)}</div>
+              ${binArr3}
+            </div>
             <div class="fw-bold text-danger ms-3" style="font-size:1.4rem;line-height:1">${arrTime}</div>
           </div>
         </div>
