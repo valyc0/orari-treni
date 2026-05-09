@@ -103,6 +103,7 @@ async function searchRoute() {
     showToast('Inserisci stazione di partenza e arrivo');
     return;
   }
+  saveRecentRoute(routeFrom, routeTo);
   if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
 
   // Aggiorna icona bottone salva

@@ -15,3 +15,4 @@ window.addEventListener('resize', adjustLayout);
 if (document.fonts) document.fonts.ready.then(adjustLayout);
 
 renderFavorites();
+renderOrariEmpty();
