@@ -176,9 +176,10 @@
       background: rgba(0,0,0,.42);
       z-index: 1042;
       opacity: 0;
+      pointer-events: none;          /* non blocca i click quando non è visibile */
       transition: opacity .25s;
     }
-    .ai-chat-backdrop.show { opacity: 1; }
+    .ai-chat-backdrop.show { opacity: 1; pointer-events: auto; }
 
     /* ── AI Chat panel ── */
     .ai-chat-panel {
@@ -191,10 +192,11 @@
       box-shadow: 0 -4px 28px rgba(0,0,0,.18);
       z-index: 1043;
       display: flex; flex-direction: column;
-      transform: translateY(105%);
+      transform: translateY(110%);   /* 110% garantisce che sia completamente fuori schermo */
+      pointer-events: none;          /* non blocca i click quando è chiuso */
       transition: transform .28s cubic-bezier(.4,0,.2,1);
     }
-    .ai-chat-panel.open { transform: translateY(0); }
+    .ai-chat-panel.open { transform: translateY(0); pointer-events: auto; }
 
     .ai-chat-header {
       display: flex; align-items: center; justify-content: space-between;
