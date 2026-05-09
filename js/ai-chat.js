@@ -106,6 +106,8 @@ async function sendAIMessage() {
 
 /* ── Voce input (SpeechRecognition) ── */
 
+let _micGotResult = false;
+
 function toggleVoiceInput() {
   if (_isListening) { _stopVoice(); return; }
 
@@ -117,8 +119,10 @@ function toggleVoiceInput() {
 
   _recognition = new SpeechRec();
   _recognition.lang            = 'it-IT';
+  _recognition.continuous      = false;
   _recognition.interimResults  = false;
   _recognition.maxAlternatives = 1;
+  _micGotResult                = false;
 
   _recognition.onstart = () => {
     _isListening = true;
@@ -128,21 +132,49 @@ function toggleVoiceInput() {
     btn.innerHTML = '<i class="bi bi-mic-fill"></i>';
   };
 
+  // Solo cattura il testo – NON chiama stop() qui (evita doppio onend)
   _recognition.onresult = e => {
-    const transcript = e.results[0][0].transcript.trim();
-    document.getElementById('aiChatInput').value = transcript;
-    _stopVoice();
-    sendAIMessage();
+    const transcript = (e.results[0][0].transcript || '').trim();
+    if (transcript) {
+      document.getElementById('aiChatInput').value = transcript;
+      _micGotResult = true;
+    }
   };
 
-  _recognition.onerror = _recognition.onend = () => _stopVoice();
-  _recognition.start();
+  // onend è il punto unico di cleanup; invia solo se abbiamo testo
+  _recognition.onend = () => {
+    const shouldSend = _micGotResult;
+    _stopVoice();               // resetta UI e flag
+    if (shouldSend) sendAIMessage();
+  };
+
+  // onerror separato: gestisce no-speech / not-allowed / ecc.
+  _recognition.onerror = e => {
+    const err = e.error;
+    if (err !== 'no-speech' && err !== 'aborted') {
+      showToast(err === 'not-allowed'
+        ? 'Permesso microfono negato'
+        : `Errore microfono: ${err}`);
+    }
+    // onend seguirà comunque, lasciamo che faccia il cleanup
+  };
+
+  try {
+    _recognition.start();
+  } catch (ex) {
+    console.warn('[Mic] start error', ex);
+    _stopVoice();
+  }
 }
 
 function _stopVoice() {
-  _isListening = false;
-  _recognition?.stop();
-  _recognition = null;
+  if (!_isListening && !_recognition) return;  // già fermato
+  _isListening  = false;
+  _micGotResult = false;
+  // Null prima di stop() per evitare ri-entrata da onend
+  const rec = _recognition;
+  _recognition  = null;
+  try { rec?.stop(); } catch (_) {}
   const btn = document.getElementById('aiMicBtn');
   if (!btn) return;
   btn.classList.remove('btn-danger', 'ai-mic-active');
