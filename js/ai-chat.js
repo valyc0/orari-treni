@@ -13,12 +13,21 @@ const AI_SYSTEM_PROMPT =
   `e le principali stazioni hub (Roma Termini, Milano Centrale, Napoli Centrale, ecc.). ` +
   `Rispondi SEMPRE in italiano, in modo conciso e diretto. ` +
   `Se l'utente chiede orari in tempo reale, spiega che non hai dati live ` +
-  `ma puoi fornire indicazioni su orari tipici e percorsi abituali.`;
+  `ma puoi fornire indicazioni su orari tipici e percorsi abituali.\n\n` +
+  `ITINERARI: Quando l'utente chiede come andare da un posto a un altro (es. "voglio andare da X a Y", ` +
+  `"come arrivo a Z da W", "treni da A a B"), descrivi il percorso consigliato E aggiungi ` +
+  `OBBLIGATORIAMENTE come ULTIMA riga della risposta il marcatore:\n` +
+  `[ROUTE:{"from":"NOME_STAZIONE_PARTENZA","to":"NOME_STAZIONE_DESTINAZIONE"}]\n` +
+  `Aggiungi anche "date":"YYYY-MM-DD" e "time":"HH:MM" se l'utente li ha specificati. ` +
+  `Usa nomi di stazioni Trenitalia standard (es. "Roma Termini", "Milano Centrale", ` +
+  `"Napoli Centrale", "Villa Bonelli", "Isernia"). ` +
+  `NON includere il marcatore per domande generiche non legate a un itinerario specifico.`;
 
-let _aiHistory   = [];
-let _ttsEnabled  = false;
-let _isListening = false;
-let _recognition = null;
+let _aiHistory     = [];
+let _ttsEnabled    = false;
+let _isListening   = false;
+let _recognition   = null;
+const _pendingRoutes = [];   // route data salvati per i bottoni "cerca itinerario"
 
 /* ── Apri / chiudi pannello ── */
 
@@ -69,6 +78,92 @@ function _showTyping() {
 }
 function _hideTyping() { document.getElementById('aiTypingIndicator')?.remove(); }
 
+/** Aggiunge una card-azione "Cerca itinerario" nel pannello chat. */
+function _appendRouteButton(routeData) {
+  const idx       = _pendingRoutes.push(routeData) - 1;
+  const container = document.getElementById('aiChatMessages');
+  const div       = document.createElement('div');
+  div.className   = 'ai-msg ai-msg-assistant';
+  const dateLabel = routeData.date
+    ? ` · ${routeData.date}${routeData.time ? ' ' + routeData.time : ''}`
+    : '';
+  div.innerHTML = `
+    <div class="ai-bubble ai-route-action">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <i class="bi bi-map-fill text-primary"></i>
+        <span class="fw-semibold small">Itinerario trovato</span>
+      </div>
+      <div class="small text-muted mb-2">
+        <i class="bi bi-circle-fill text-success me-1" style="font-size:.4rem;vertical-align:middle"></i>${esc(routeData.from)}<br>
+        <i class="bi bi-geo-alt-fill text-danger me-1"></i>${esc(routeData.to)}${esc(dateLabel)}
+      </div>
+      <button class="btn btn-primary btn-sm w-100" onclick="openRouteFromAI(${idx})">
+        <i class="bi bi-search me-1"></i>Cerca orari e coincidenze
+      </button>
+    </div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+/**
+ * Apre la tab Itinerario e avvia la ricerca con i dati forniti dall'AI.
+ * Cercal le stazioni per nome tramite l'API ViaggaTreno, poi chiama searchRoute().
+ */
+async function openRouteFromAI(idx) {
+  const routeData = _pendingRoutes[idx];
+  if (!routeData) return;
+
+  closeAIChat();
+  showPage('itinerario');
+
+  const resEl = document.getElementById('routeResults');
+  resEl.innerHTML = `<div class="d-flex justify-content-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <span class="ms-3 text-secondary align-self-center">Ricerca stazioni…</span>
+  </div>`;
+
+  try {
+    const [fromList, toList] = await Promise.all([
+      searchStations(routeData.from),
+      searchStations(routeData.to),
+    ]);
+
+    resEl.innerHTML = '';
+
+    // Riempie i campi del form con quello che abbiamo trovato
+    const fillField = (elId, clearId, st, fallback) => {
+      if (st) {
+        document.getElementById(elId).value = st.name;
+        document.getElementById(clearId).classList.remove('d-none');
+      } else {
+        document.getElementById(elId).value = fallback; // nome grezzo dall'AI
+      }
+    };
+
+    const from = fromList[0] || null;
+    const to   = toList[0]   || null;
+
+    routeFrom = from;
+    routeTo   = to;
+    fillField('routeFrom', 'clearFrom', from, routeData.from);
+    fillField('routeTo',   'clearTo',   to,   routeData.to);
+
+    if (routeData.date) document.getElementById('routeDate').value = routeData.date;
+    if (routeData.time) document.getElementById('routeTime').value = routeData.time;
+
+    if (!from || !to) {
+      showToast('Stazione non trovata – controlla i campi e premi Cerca');
+      return;
+    }
+
+    searchRoute();
+  } catch (err) {
+    console.error('[AIRoute]', err);
+    resEl.innerHTML = '';
+    showToast('Errore nella ricerca – riprova');
+  }
+}
+
 /* ── Invio messaggio ── */
 
 async function sendAIMessage() {
@@ -93,10 +188,22 @@ async function sendAIMessage() {
       ..._aiHistory.slice(-14),   // ultimi 7 scambi (14 messaggi)
     ];
     const raw   = await puter.ai.chat(messages, { model: 'gpt-4o-mini' });
-    const reply = typeof raw === 'string' ? raw
+    let   reply = typeof raw === 'string' ? raw
       : (raw?.message?.content || raw?.content || String(raw));
+    reply = reply.trim();
+
+    // Estrai marcatore [ROUTE:{...}] se presente
+    const routeMatch = reply.match(/\[ROUTE:(\{[^[\]]+\})\]/i);
+    let routeData = null;
+    if (routeMatch) {
+      try   { routeData = JSON.parse(routeMatch[1]); }
+      catch (_) { /* formato non valido, ignora */ }
+      reply = reply.replace(/\[ROUTE:[^\]]+\]/i, '').trim();
+    }
+
     _hideTyping();
-    _appendMsg('assistant', reply.trim());
+    _appendMsg('assistant', reply);
+    if (routeData?.from && routeData?.to) _appendRouteButton(routeData);
   } catch (err) {
     _hideTyping();
     console.error('[AIChat]', err);
