@@ -112,6 +112,7 @@ async function loadTratta(card) {
 /* ── renderFermate (treno diretto) ── */
 
 function renderFermate(data, fromName, toName, depTs) {
+  if (!data) return `<p class="text-center text-muted py-4">Nessuna fermata disponibile</p>`;
   const fermate = data.fermate || [];
   if (!fermate.length) return `<p class="text-center text-muted py-4">Nessuna fermata disponibile</p>`;
 
@@ -258,6 +259,7 @@ function renderFermate(data, fromName, toName, depTs) {
 /* ── renderFermateWithConnection (treno con coincidenza) ── */
 
 function renderFermateWithConnection(data1, data2, fromName, transferName, toName, depTs) {
+  if (!data1 || !data2) return `<p class="text-center text-muted py-4">Nessuna fermata disponibile</p>`;
   const cat1 = (data1.categoria || '').trim().toUpperCase() || 'REG';
   const cat2 = (data2.categoria || '').trim().toUpperCase() || 'REG';
   const [bg1, tx1] = getCatColors(cat1);

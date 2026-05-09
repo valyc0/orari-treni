@@ -368,7 +368,9 @@ function renderRouteCard({ dep, arr }) {
   const trainLabel = `${cat} ${numLabel} → ${routeTo.name}`.trim();
   const codOrigine = dep.codOrigine || '';
   const trainNum   = dep.numeroTreno || '';
-  const trainDate  = dep.dataPartenzaTreno || '';
+  // dataPartenzaTreno può essere null su treni regionali futuri: fallback a mezzanotte del giorno di partenza
+  const trainDate  = dep.dataPartenzaTreno
+    || (tDep ? new Date(new Date(tDep).setHours(0, 0, 0, 0)).getTime() : '');
   const isPast     = tDep && tDep < Date.now();
 
   return `
