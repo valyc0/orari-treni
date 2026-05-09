@@ -184,17 +184,19 @@
     /* ── AI Chat panel ── */
     .ai-chat-panel {
       position: fixed;
-      bottom: var(--nav-h);
+      bottom: 0;
       left: 0; right: 0;
-      height: 72vh; max-height: 640px;
+      height: calc(72vh + var(--nav-h));
+      max-height: calc(640px + var(--nav-h));
+      padding-bottom: var(--nav-h);
       background: #fff;
       border-radius: 18px 18px 0 0;
       box-shadow: 0 -4px 28px rgba(0,0,0,.18);
       z-index: 1043;
       display: flex; flex-direction: column;
-      transform: translateY(110%);   /* 110% garantisce che sia completamente fuori schermo */
-      pointer-events: none;          /* non blocca i click quando è chiuso */
-      transition: transform .28s cubic-bezier(.4,0,.2,1);
+      transform: translateY(100%);   /* 100% = altezza intera → fuori schermo */
+      pointer-events: none;
+      transition: transform .3s cubic-bezier(.4,0,.2,1);
     }
     .ai-chat-panel.open { transform: translateY(0); pointer-events: auto; }
 
