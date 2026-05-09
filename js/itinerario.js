@@ -172,17 +172,33 @@ async function searchRoute() {
       } catch (err) { console.error('searchRouteWithConnections error:', err); }
 
       if (!connections.length) {
+        // Fallback AI: nessuna coincidenza trovata, chiediamo all'AI le stazioni intermedie
+        resEl.innerHTML = `
+          <div class="d-flex flex-column align-items-center justify-content-center py-4 text-muted">
+            <div class="spinner-border spinner-border-sm text-secondary mb-2" role="status"></div>
+            <small><i class="bi bi-robot me-1"></i>Nessuna coincidenza trovata — chiedo all'AI…</small>
+          </div>`;
+        try {
+          connections = await searchRouteAIGuided(date0);
+        } catch (err) { console.error('searchRouteAIGuided error:', err); }
+      }
+
+      if (!connections.length) {
         resEl.innerHTML = renderEmptyState('map', 'Nessun treno trovato', 'Prova a cambiare data o orario');
         return;
       }
+
+      const has2hop  = connections.some(c => c.type === '2hop');
+      const coinLabel = has2hop ? '2 coincidenze <span class="badge bg-secondary ms-1">AI</span>'
+                                : 'coincidenza';
       resEl.innerHTML = `
         <div class="px-3 py-2">
           <small class="text-muted fw-semibold">
             ${esc(routeFrom.name)} → ${esc(routeTo.name)}
-            &nbsp;•&nbsp; ${connections.length} soluzione${connections.length === 1 ? '' : 'i'} con coincidenza
+            &nbsp;•&nbsp; ${connections.length} soluzione${connections.length === 1 ? '' : 'i'} con ${coinLabel}
           </small>
         </div>
-        <div class="px-3 pb-3">${connections.map(renderConnectionCard).join('')}</div>`;
+        <div class="px-3 pb-3">${connections.map(c => c.type === '2hop' ? renderConnection2Card(c) : renderConnectionCard(c)).join('')}</div>`;
       attachRouteCardCountdowns(resEl);
       return;
     }
