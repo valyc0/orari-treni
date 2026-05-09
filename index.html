@@ -151,6 +151,110 @@
       .bottom-nav { max-width: 540px; left: 50% !important; right: auto !important;
                     transform: translateX(-50%); width: 540px; }
     }
+
+    /* ── AI Chat FAB ── */
+    .ai-chat-fab {
+      position: fixed;
+      bottom: calc(var(--nav-h) + 14px);
+      right: 16px;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1a56db 0%, #7c3aed 100%);
+      color: #fff;
+      border: none;
+      box-shadow: 0 4px 16px rgba(99,60,219,.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1041;
+      cursor: pointer;
+      transition: transform .18s, box-shadow .18s;
+    }
+    .ai-chat-fab:hover { transform: scale(1.08); box-shadow: 0 6px 22px rgba(99,60,219,.55); }
+
+    /* ── AI Chat backdrop ── */
+    .ai-chat-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.42);
+      z-index: 1042;
+      opacity: 0;
+      transition: opacity .25s;
+    }
+    .ai-chat-backdrop.show { opacity: 1; }
+
+    /* ── AI Chat panel ── */
+    .ai-chat-panel {
+      position: fixed;
+      bottom: var(--nav-h);
+      left: 0; right: 0;
+      height: 72vh; max-height: 640px;
+      background: #fff;
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -4px 28px rgba(0,0,0,.18);
+      z-index: 1043;
+      display: flex; flex-direction: column;
+      transform: translateY(105%);
+      transition: transform .28s cubic-bezier(.4,0,.2,1);
+    }
+    .ai-chat-panel.open { transform: translateY(0); }
+
+    .ai-chat-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    .ai-chat-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: linear-gradient(135deg, #1a56db, #7c3aed);
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; flex-shrink: 0;
+    }
+    .ai-chat-messages {
+      flex: 1; overflow-y: auto;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .ai-msg { display: flex; }
+    .ai-msg-user      { justify-content: flex-end; }
+    .ai-msg-assistant { justify-content: flex-start; }
+    .ai-bubble {
+      max-width: 84%; padding: 9px 13px;
+      border-radius: 16px;
+      font-size: .88rem; line-height: 1.48;
+    }
+    .ai-msg-user .ai-bubble {
+      background: #1a56db; color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .ai-msg-assistant .ai-bubble {
+      background: #f3f4f6; color: #111827;
+      border-bottom-left-radius: 4px;
+    }
+    .ai-typing { display: flex; align-items: center; gap: 5px; padding: 12px 14px !important; }
+    .ai-typing span {
+      width: 7px; height: 7px; background: #9ca3af; border-radius: 50%;
+      animation: aiBounce .9s infinite;
+    }
+    .ai-typing span:nth-child(2) { animation-delay: .2s; }
+    .ai-typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes aiBounce {
+      0%,80%,100% { transform: translateY(0); }
+      40%         { transform: translateY(-6px); }
+    }
+    .ai-chat-inputbar {
+      padding: 10px 12px;
+      border-top: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    @keyframes aiMicPulse {
+      from { box-shadow: 0 0 0 0 rgba(220,38,38,.45); }
+      to   { box-shadow: 0 0 0 9px rgba(220,38,38,0); }
+    }
+    .ai-mic-active { animation: aiMicPulse .75s infinite alternate; }
+
+    @media (min-width: 540px) {
+      .ai-chat-fab  { right: calc(50vw - 254px); }
+      .ai-chat-panel { left: calc(50vw - 270px); right: calc(50vw - 270px); }
+    }
   </style>
 </head>
 <body>
@@ -341,6 +445,48 @@
 </div>
 
 
+<!-- ══════════ AI CHAT FAB + PANEL ══════════ -->
+<button id="aiChatFab" class="ai-chat-fab" onclick="openAIChat()" title="Assistente AI">
+  <i class="bi bi-robot" style="font-size:1.4rem"></i>
+</button>
+
+<div id="aiChatBackdrop" class="ai-chat-backdrop d-none" onclick="closeAIChat()"></div>
+
+<div id="aiChatPanel" class="ai-chat-panel">
+  <div class="ai-chat-header">
+    <div class="d-flex align-items-center gap-2">
+      <div class="ai-chat-avatar"><i class="bi bi-robot"></i></div>
+      <div>
+        <div class="fw-bold lh-sm">Assistente Treni</div>
+        <div class="text-muted" style="font-size:.7rem">Powered by AI</div>
+      </div>
+    </div>
+    <div class="d-flex gap-1 align-items-center">
+      <button id="aiTtsBtn" class="btn btn-sm btn-outline-secondary" onclick="toggleAITTS()" title="Leggi ad alta voce">
+        <i class="bi bi-volume-up"></i>
+      </button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="closeAIChat()" title="Chiudi">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+  </div>
+  <div id="aiChatMessages" class="ai-chat-messages"></div>
+  <div class="ai-chat-inputbar">
+    <div class="d-flex gap-2">
+      <input type="text" id="aiChatInput" class="form-control"
+             placeholder="Chiedi sui treni…"
+             autocomplete="off" autocorrect="off" spellcheck="false">
+      <button id="aiMicBtn" class="btn btn-outline-secondary flex-shrink-0" onclick="toggleVoiceInput()" title="Parla">
+        <i class="bi bi-mic"></i>
+      </button>
+      <button class="btn btn-primary flex-shrink-0" onclick="sendAIMessage()">
+        <i class="bi bi-send-fill"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+
 <!-- ══════════ TOAST ══════════ -->
 <div id="toastWrap" class="position-fixed start-50 translate-middle-x">
   <div id="appToast" class="toast align-items-center text-bg-dark border-0 shadow" role="alert" aria-live="assertive">
@@ -364,6 +510,7 @@
 <script src="js/tratta.js"></script>
 <script src="js/connections.js"></script>
 <script src="js/itinerario.js"></script>
+<script src="js/ai-chat.js"></script>
 <script src="js/navigation.js"></script>
 <script src="js/main.js"></script>
 <script>
