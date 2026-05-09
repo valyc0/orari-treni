@@ -255,22 +255,35 @@ async function loadPuter() {
 
 /**
  * Chiede all'AI (via puter.js) le stazioni di coincidenza per la tratta corrente.
+ * @param {Date} date0 orario di partenza desiderato (per contestualizzare il prompt)
  * @returns {string[]} array di nomi stazione
  */
-async function getAIHubs() {
+async function getAIHubs(date0) {
   const ok = await loadPuter();
   if (!ok) { console.warn('[AI] puter.js non caricato'); return []; }
   try {
+    const timeStr = date0
+      ? date0.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const dateStr = date0
+      ? date0.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
+      : '';
     const prompt =
-      `Sei un esperto di ferrovie italiane Trenitalia/RFI. ` +
-      `Per viaggiare in treno da "${routeFrom.name}" a "${routeTo.name}", ` +
-      `elenca TUTTE le stazioni dove bisogna fisicamente cambiare treno, ` +
-      `incluse stazioni suburbane o locali (es. Roma Ostiense se si cambia lì ` +
-      `dal regionale al diretto).\n\n` +
+      `Sei un esperto di ferrovie italiane con conoscenza approfondita della rete ` +
+      `Trenitalia/RFI, incluse le linee suburbane FL di Roma.\n\n` +
+      `Devo viaggiare in treno da "${routeFrom.name}" a "${routeTo.name}"` +
+      (dateStr && timeStr ? ` il ${dateStr} con partenza intorno alle ${timeStr}` : '') + `.\n\n` +
+      `Analizza il percorso e dimmi TUTTE le stazioni dove bisogna cambiare treno fisicamente, ` +
+      `nell'ordine corretto. Tieni conto che:\n` +
+      `- Le linee suburbane FL1-FL8 di Roma hanno stazioni terminali specifiche ` +
+      `(es. FL1 termina a Roma Ostiense, non a Roma Termini)\n` +
+      `- Se serve un trasferimento tra stazioni diverse (es. Roma Ostiense → Roma Termini), ` +
+      `elenca ENTRAMBE come stazioni di cambio separate\n` +
+      `- Includi anche stazioni intermedie minori se il cambio fisico avviene lì\n\n` +
       `Rispondi SOLO con i nomi esatti delle stazioni ferroviarie italiane, ` +
       `nell'ordine corretto del percorso, separati da virgola. ` +
       `Non includere "${routeFrom.name}" né "${routeTo.name}". ` +
-      `Solo le stazioni intermedie di cambio, senza altro testo.`;
+      `Nessun altro testo, solo i nomi delle stazioni.`;
     const raw  = await puter.ai.chat(prompt, { model: 'gpt-4o-mini' });
     const text = typeof raw === 'string' ? raw
                : (raw?.message?.content || raw?.content || '');
@@ -352,40 +365,92 @@ async function getTerminalHubsFromDeps(date0) {
 }
 
 /**
- * Costruisce le connessioni per una catena a 2 hub (3 leg, 2 trasferimenti).
+ * Recupera tutte le coppie dep/arr tra due stazioni in una finestra di 5 ore,
+ * partendo da date0Ts. Più ampio di findDirectLeg, per uso nei leg intermedi.
+ * @returns {Array<{dep, arr, depTime, arrTime}>} ordinato per orario di partenza
+ */
+async function fetchLeg(fromId, toId, date0Ts) {
+  const date0 = new Date(date0Ts);
+  const windows = [0, 60, 120, 180, 240, 300].map(d =>
+    viTimestamp(new Date(date0.getTime() + d * 60000))
+  );
+  const [depRes, arrRes] = await Promise.all([
+    Promise.all(windows.map(ts => getDepartures(fromId, null, ts).catch(() => []))),
+    Promise.all(windows.map(ts => getArrivals(toId,   null, ts).catch(() => []))),
+  ]);
+  const depMap = new Map(), arrMap = new Map();
+  depRes.flat().forEach(t => { const k = String(t.numeroTreno || ''); if (k && !depMap.has(k)) depMap.set(k, t); });
+  arrRes.flat().forEach(t => { const k = String(t.numeroTreno || ''); if (k && !arrMap.has(k)) arrMap.set(k, t); });
+  const out = [];
+  depMap.forEach((dep, k) => {
+    const arr  = arrMap.get(k);
+    if (!arr) return;
+    const tDep = dep.orarioPartenza || dep.orarioPartenzaZero;
+    const tArr = arr.orarioArrivo   || arr.orarioArrivoZero;
+    if (tDep && tArr && tDep >= date0Ts && tDep < tArr)
+      out.push({ dep, arr, depTime: tDep, arrTime: tArr });
+  });
+  out.sort((a, b) => a.depTime - b.depTime);
+  console.log(`[AI] fetchLeg ${fromId}→${toId}: ${out.length} treni`);
+  return out;
+}
+
+/**
+ * Costruisce le connessioni per una catena a 2 hub (3 leg, 2 trasferimenti)
+ * usando l'approccio "partenza più tarda": per ogni treno finale (leg3) cerca
+ * il leg2 e leg1 con partenza il più tarda possibile → minimizza le attese.
  */
 async function buildChain4(chain, date0, MIN_TRANSFER_MS) {
+  const start = date0.getTime();
+  // Fetch tutti e 3 i leg in parallelo partendo da date0 con finestre ampie
+  const [leg1s, leg2s, leg3s] = await Promise.all([
+    fetchLeg(chain[0].id, chain[1].id, start),
+    fetchLeg(chain[1].id, chain[2].id, start),
+    fetchLeg(chain[2].id, chain[3].id, start),
+  ]);
+  console.log(`[AI] buildChain4 leg1:${leg1s.length} leg2:${leg2s.length} leg3:${leg3s.length}`);
+
   const connections = [];
-  const leg1List = await findDirectLeg(chain[0].id, chain[1].id, date0.getTime());
-  for (const leg1 of leg1List.slice(0, 3)) {
-    const leg2List = await findDirectLeg(chain[1].id, chain[2].id, leg1.arrTime + MIN_TRANSFER_MS);
-    for (const leg2 of leg2List.slice(0, 2)) {
-      const leg3List = await findDirectLeg(chain[2].id, chain[3].id, leg2.arrTime + MIN_TRANSFER_MS);
-      for (const leg3 of leg3List.slice(0, 2)) {
-        connections.push({
-          type:      '2hop',
-          key:       `${leg1.dep.numeroTreno}→${leg2.dep.numeroTreno}→${leg3.dep.numeroTreno}`,
-          leg1:      { train: leg1.dep, depTime: leg1.depTime },
-          transfer1: {
-            stationId:   chain[1].id,
-            stationName: chain[1].name,
-            arrTime:     leg1.arrTime,
-            depTime:     leg2.depTime,
-            waitMin:     Math.round((leg2.depTime - leg1.arrTime) / 60000),
-          },
-          leg2:      { train: leg2.dep },
-          transfer2: {
-            stationId:   chain[2].id,
-            stationName: chain[2].name,
-            arrTime:     leg2.arrTime,
-            depTime:     leg3.depTime,
-            waitMin:     Math.round((leg3.depTime - leg2.arrTime) / 60000),
-          },
-          leg3:      { train: leg3.arr, arrTime: leg3.arrTime },
-          totalMin:  Math.round((leg3.arrTime - leg1.depTime) / 60000),
-        });
-      }
-    }
+  const seen = new Set();
+
+  // Itera sul treno finale; per ognuno trova il leg2 e leg1 più tardi compatibili
+  for (const leg3 of leg3s) {
+    // leg2 deve arrivare a chain[2] almeno MIN_TRANSFER_MS prima di leg3
+    const validLeg2 = leg2s.filter(l2 => l2.arrTime + MIN_TRANSFER_MS <= leg3.depTime);
+    if (!validLeg2.length) continue;
+    const bestLeg2 = validLeg2[validLeg2.length - 1]; // più tardo = meno attesa a hub2
+
+    // leg1 deve arrivare a chain[1] almeno MIN_TRANSFER_MS prima di bestLeg2
+    const validLeg1 = leg1s.filter(l1 => l1.arrTime + MIN_TRANSFER_MS <= bestLeg2.depTime);
+    if (!validLeg1.length) continue;
+    const bestLeg1 = validLeg1[validLeg1.length - 1]; // più tardo = meno attesa a hub1
+
+    const key = `${bestLeg1.dep.numeroTreno}→${bestLeg2.dep.numeroTreno}→${leg3.dep.numeroTreno}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    connections.push({
+      type:      '2hop',
+      key,
+      leg1:      { train: bestLeg1.dep, depTime: bestLeg1.depTime },
+      transfer1: {
+        stationId:   chain[1].id,
+        stationName: chain[1].name,
+        arrTime:     bestLeg1.arrTime,
+        depTime:     bestLeg2.depTime,
+        waitMin:     Math.round((bestLeg2.depTime - bestLeg1.arrTime) / 60000),
+      },
+      leg2:      { train: bestLeg2.dep },
+      transfer2: {
+        stationId:   chain[2].id,
+        stationName: chain[2].name,
+        arrTime:     bestLeg2.arrTime,
+        depTime:     leg3.depTime,
+        waitMin:     Math.round((leg3.depTime - bestLeg2.arrTime) / 60000),
+      },
+      leg3:      { train: leg3.arr, arrTime: leg3.arrTime },
+      totalMin:  Math.round((leg3.arrTime - bestLeg1.depTime) / 60000),
+    });
   }
   return connections;
 }
@@ -398,7 +463,7 @@ async function buildChain4(chain, date0, MIN_TRANSFER_MS) {
  * @returns {Array} array di oggetti connessione
  */
 async function searchRouteAIGuided(date0) {
-  const hubNames = await getAIHubs();
+  const hubNames = await getAIHubs(date0);
   if (!hubNames.length) { console.warn('[AI] nessun hub dall\'AI'); return []; }
 
   // Risolvi i nomi in ID stazione ViaggaTreno
@@ -418,30 +483,33 @@ async function searchRouteAIGuided(date0) {
   let connections = [];
 
   if (hubStations.length === 1) {
-    // Prova prima 1 hub (chain 3)
-    const chain3   = [routeFrom, hubStations[0], routeTo];
-    const leg1List = await findDirectLeg(chain3[0].id, chain3[1].id, date0.getTime());
+    // 1 hub: fetch entrambi i leg in parallelo con finestre ampie
+    const chain3 = [routeFrom, hubStations[0], routeTo];
+    const [leg1s, leg2s] = await Promise.all([
+      fetchLeg(chain3[0].id, chain3[1].id, date0.getTime()),
+      fetchLeg(chain3[1].id, chain3[2].id, date0.getTime()),
+    ]);
 
-    if (leg1List.length > 0) {
-      // 1 hub funziona → struttura identica a renderConnectionCard
-      for (const leg1 of leg1List.slice(0, 5)) {
-        const leg2List = await findDirectLeg(chain3[1].id, chain3[2].id, leg1.arrTime + MIN_TRANSFER_MS);
-        for (const leg2 of leg2List.slice(0, 3)) {
-          connections.push({
-            key:      `${leg1.dep.numeroTreno}→${leg2.dep.numeroTreno}`,
-            leg1:     { train: leg1.dep, depTime: leg1.depTime },
-            transfer: {
-              stationId:   chain3[1].id,
-              stationName: chain3[1].name,
-              arrTime:     leg1.arrTime,
-              depTime:     leg2.depTime,
-              waitMin:     Math.round((leg2.depTime - leg1.arrTime) / 60000),
-              binEff: null, binProg: null,
-            },
-            leg2:     { train: leg2.arr, arrTime: leg2.arrTime },
-            totalMin: Math.round((leg2.arrTime - leg1.depTime) / 60000),
-          });
-        }
+    if (leg1s.length > 0) {
+      // "Partenza più tarda": per ogni leg2 finale, trova il leg1 più tardo compatibile
+      for (const leg2 of leg2s) {
+        const validLeg1 = leg1s.filter(l1 => l1.arrTime + MIN_TRANSFER_MS <= leg2.depTime);
+        if (!validLeg1.length) continue;
+        const bestLeg1 = validLeg1[validLeg1.length - 1];
+        connections.push({
+          key:      `${bestLeg1.dep.numeroTreno}→${leg2.dep.numeroTreno}`,
+          leg1:     { train: bestLeg1.dep, depTime: bestLeg1.depTime },
+          transfer: {
+            stationId:   chain3[1].id,
+            stationName: chain3[1].name,
+            arrTime:     bestLeg1.arrTime,
+            depTime:     leg2.depTime,
+            waitMin:     Math.round((leg2.depTime - bestLeg1.arrTime) / 60000),
+            binEff: null, binProg: null,
+          },
+          leg2:     { train: leg2.arr, arrTime: leg2.arrTime },
+          totalMin: Math.round((leg2.arrTime - bestLeg1.depTime) / 60000),
+        });
       }
     } else {
       // leg1 fallito: l'hub AI non è raggiungibile direttamente da routeFrom.
