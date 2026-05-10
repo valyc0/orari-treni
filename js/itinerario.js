@@ -55,28 +55,55 @@ function setupRouteAc(input, listEl, dropEl, clearBtn, onSelect) {
     listEl.innerHTML = '';
   }
 
+  function _renderRouteAcResults(list) {
+    if (!list.length) { closeRouteDropdown(); return; }
+    listEl.innerHTML = list.slice(0, 8).map(renderAcItem).join('');
+    dropEl.classList.add('show');
+    listEl.querySelectorAll('.ac-item').forEach(el =>
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        onSelect({ id: el.dataset.id, name: el.dataset.name });
+        input.value = el.dataset.name;
+        clearBtn.classList.remove('d-none');
+        closeRouteDropdown();
+      }));
+  }
+
   input.addEventListener('input', () => {
     const q = input.value.trim();
     clearBtn.classList.toggle('d-none', q.length === 0);
     clearTimeout(timer);
     if (q.length < 2) { closeRouteDropdown(); return; }
+
+    // Risultati istantanei dalla cache locale
+    const local = searchStationsLocal(q);
+    if (local !== null) { _renderRouteAcResults(local); return; }
+
+    // Fallback API con debounce (+ polling cache mentre lo spinner gira)
     timer = setTimeout(async () => {
       listEl.innerHTML = '<div class="d-flex justify-content-center align-items-center py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div><span class="ms-2 text-secondary">Ricerca...</span></div>';
       dropEl.classList.add('show');
+
+      let _done = false;
+      const poller = setInterval(() => {
+        if (_done) { clearInterval(poller); return; }
+        const local = searchStationsLocal(q);
+        if (local === null) return;
+        clearInterval(poller);
+        _done = true;
+        _renderRouteAcResults(local);
+      }, 300);
+
       try {
         const list = await searchStations(q);
-        if (!list.length) { closeRouteDropdown(); return; }
-        listEl.innerHTML = list.slice(0, 8).map(renderAcItem).join('');
-        dropEl.classList.add('show');
-        listEl.querySelectorAll('.ac-item').forEach(el =>
-          el.addEventListener('click', e => {
-            e.preventDefault();
-            onSelect({ id: el.dataset.id, name: el.dataset.name });
-            input.value = el.dataset.name;
-            clearBtn.classList.remove('d-none');
-            closeRouteDropdown();
-          }));
-      } catch { closeRouteDropdown(); }
+        if (_done) return;
+        clearInterval(poller);
+        _done = true;
+        _renderRouteAcResults(list);
+      } catch {
+        clearInterval(poller);
+        if (!_done) closeRouteDropdown();
+      }
     }, 380);
   });
 
@@ -378,6 +405,7 @@ function renderRouteCard({ dep, arr }) {
   <div class="card border-0 shadow-sm mb-3 solution-card${isPast ? ' opacity-50' : ''}"
        style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${tDep || ''}"
+       data-delay-min="${ritardo}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(trainNum))}"
        data-train-date="${esc(String(trainDate))}"
@@ -425,6 +453,7 @@ function renderRouteCard({ dep, arr }) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="cd-delay-note text-warning small mb-1" style="min-height:1.2em"></div>
         <div class="d-flex gap-2 justify-content-center mt-1">
           <button class="btn btn-sm btn-success cd-notif-btn">
             <i class="bi bi-bell me-1"></i>Attiva allarme
@@ -505,14 +534,21 @@ function updateNotifBtn(card) {
 }
 
 function updateCountdownCard(card) {
-  const depTs = parseInt(card.dataset.depTs, 10);
-  const el    = card.querySelector('.countdown-value');
+  const depTs    = parseInt(card.dataset.depTs, 10);
+  const delayMin = parseInt(card.dataset.delayMin || '0', 10);
+  const el       = card.querySelector('.countdown-value');
   if (!el || isNaN(depTs)) return;
 
-  const diff = depTs - Date.now();
+  // Orario effettivo = programmato + ritardo
+  const actualTs = depTs + delayMin * 60_000;
+  const diff     = actualTs - Date.now();
+
   if (diff <= 0) {
     el.textContent = 'Partito';
     el.className   = 'countdown-value fw-bold text-danger';
+    // Nasconde la nota ritardo se presente
+    const note = card.querySelector('.cd-delay-note');
+    if (note) note.textContent = '';
     return;
   }
 
@@ -531,9 +567,10 @@ function updateCountdownCard(card) {
       if (prevSec >= sec && totalSec < sec) {
         const vib  = getVibrationPattern(i);
         if (navigator.vibrate) navigator.vibrate(vib);
+        const delayNote = delayMin > 0 ? ` (ritardo +${delayMin} min)` : '';
         const body = minLabel === 1
-          ? 'Partenza tra meno di 1 minuto'
-          : `Partenza tra meno di ${minLabel} minuti`;
+          ? `Partenza effettiva tra meno di 1 minuto${delayNote}`
+          : `Partenza effettiva tra meno di ${minLabel} minuti${delayNote}`;
         sendNotification(trainLabel, body, `treno-${minLabel}min`, vib);
         break;
       }
@@ -548,4 +585,12 @@ function updateCountdownCard(card) {
   el.textContent = h > 0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
   el.className   = 'countdown-value fw-bold fs-3 ' +
     (totalSec < 300 ? 'text-danger' : totalSec < 900 ? 'text-warning' : 'text-success');
+
+  // Mostra nota orario effettivo se il treno è in ritardo
+  const note = card.querySelector('.cd-delay-note');
+  if (note) {
+    note.textContent = delayMin > 0
+      ? `⚠️ Ritardo +${delayMin} min · partenza effettiva ${formatTime(new Date(actualTs))}`
+      : '';
+  }
 }

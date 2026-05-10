@@ -297,6 +297,7 @@ function renderTrainCard(t) {
   <div class="card mb-2 border-0 shadow-sm solution-card${isPast ? ' opacity-50' : ''}"
        style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${timeMs || ''}"
+       data-delay-min="${delay}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(t.numeroTreno || ''))}"
        data-train-date="${esc(String(t.dataPartenzaTreno || ''))}"
@@ -323,6 +324,7 @@ function renderTrainCard(t) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">${timeLabel} tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="cd-delay-note text-warning small mb-1" style="min-height:1.2em"></div>
         <div class="d-flex gap-2 justify-content-center mt-1">
           <button class="btn btn-sm btn-success cd-notif-btn">
             <i class="bi bi-bell me-1"></i>Attiva allarme

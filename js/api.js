@@ -89,8 +89,15 @@ async function proxyFetch(path) {
 async function apiText(path) { return proxyFetch(path); }
 async function apiJson(path) { return JSON.parse(await proxyFetch(path)); }
 
-/** Cerca stazioni per nome (autocomplete). */
+/** Cerca stazioni per nome (autocomplete).
+ *  Usa prima la cache locale (ricerca "like" istantanea),
+ *  con fallback all'API se la cache non è ancora disponibile.
+ */
 async function searchStations(q) {
+  const local = searchStationsLocal(q);
+  if (local !== null) return local.slice(0, 20);
+
+  // Fallback API (prefix match, usato solo finché la cache si sta caricando)
   const text = await apiText('/autocompletaStazione/' + encodeURIComponent(q));
   if (!text || !text.trim()) return [];
   return text.trim().split('\n')

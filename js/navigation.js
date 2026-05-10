@@ -112,6 +112,22 @@ searchInput.addEventListener('input', () => {
   searchClear.classList.toggle('d-none', q.length === 0);
   clearTimeout(searchTimer);
   if (q.length < 2) { closeDropdown(); return; }
+
+  // Risultati istantanei dalla cache locale (nessun debounce, nessun spinner)
+  const local = searchStationsLocal(q);
+  if (local !== null) {
+    if (!local.length) { closeDropdown(); return; }
+    acList.innerHTML = local.slice(0, 9).map(renderAcItem).join('');
+    acDropdown.classList.add('show');
+    acList.querySelectorAll('.ac-item').forEach(el =>
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        selectStation(el.dataset.id, el.dataset.name);
+      }));
+    return;
+  }
+
+  // Fallback API con debounce (solo se la cache non è ancora pronta)
   searchTimer = setTimeout(() => doSearch(q), 380);
 });
 
@@ -139,8 +155,31 @@ function closeDropdown() {
 async function doSearch(q) {
   acList.innerHTML = '<div class="d-flex justify-content-center align-items-center py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"></div><span class="ms-2 text-secondary">Ricerca...</span></div>';
   acDropdown.classList.add('show');
+
+  // Mentre l'API risponde, controlla ogni 300ms se la cache locale
+  // è diventata disponibile (le prime lettere arrivano in pochi secondi).
+  let _cacheCheckDone = false;
+  const cachePoller = setInterval(() => {
+    if (_cacheCheckDone) { clearInterval(cachePoller); return; }
+    const local = searchStationsLocal(q);
+    if (local === null) return; // cache ancora vuota
+    clearInterval(cachePoller);
+    _cacheCheckDone = true;
+    if (!local.length) { closeDropdown(); return; }
+    acList.innerHTML = local.slice(0, 9).map(renderAcItem).join('');
+    acDropdown.classList.add('show');
+    acList.querySelectorAll('.ac-item').forEach(el =>
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        selectStation(el.dataset.id, el.dataset.name);
+      }));
+  }, 300);
+
   try {
     const list = await searchStations(q);
+    if (_cacheCheckDone) return; // la cache ha già risposto, ignora
+    clearInterval(cachePoller);
+    _cacheCheckDone = true;
     if (!list.length) { closeDropdown(); return; }
     acList.innerHTML = list.slice(0, 9).map(renderAcItem).join('');
     acDropdown.classList.add('show');
@@ -150,8 +189,11 @@ async function doSearch(q) {
         selectStation(el.dataset.id, el.dataset.name);
       }));
   } catch {
-    closeDropdown();
-    showToast('Errore nella ricerca – riprova');
+    clearInterval(cachePoller);
+    if (!_cacheCheckDone) {
+      closeDropdown();
+      showToast('Errore nella ricerca – riprova');
+    }
   }
 }
 

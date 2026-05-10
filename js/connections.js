@@ -587,6 +587,7 @@ function renderConnectionCard(c) {
   <div class="card border-0 shadow-sm mb-3 solution-card connection-card${isPast ? ' opacity-50' : ''}"
        style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${leg1.depTime || ''}"
+       data-delay-min="${leg1.train.ritardo || 0}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(leg1.train.numeroTreno || ''))}"
        data-train-date="${esc(String(leg1.train.dataPartenzaTreno || (leg1.depTime ? new Date(new Date(leg1.depTime).setHours(0,0,0,0)).getTime() : '')))}"
@@ -660,6 +661,7 @@ function renderConnectionCard(c) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="cd-delay-note text-warning small mb-1" style="min-height:1.2em"></div>
         <div class="d-flex gap-2 justify-content-center mt-1">
           <button class="btn btn-sm btn-success cd-notif-btn">
             <i class="bi bi-bell me-1"></i>Attiva allarme
@@ -721,6 +723,7 @@ function renderConnection2Card(c) {
   <div class="card border-0 shadow-sm mb-3 solution-card connection-card${isPast ? ' opacity-50' : ''}"
        style="${isPast ? 'filter:grayscale(.75)' : ''}"
        data-dep-ts="${leg1.depTime || ''}"
+       data-delay-min="${leg1.train.ritardo || 0}"
        data-train-label="${esc(trainLabel)}"
        data-train-num="${esc(String(leg1.train.numeroTreno || ''))}"
        data-train-date="${esc(String(leg1.train.dataPartenzaTreno || (leg1.depTime ? new Date(new Date(leg1.depTime).setHours(0,0,0,0)).getTime() : '')))}"
@@ -813,6 +816,7 @@ function renderConnection2Card(c) {
       <div class="countdown-panel d-none border-top mt-2 pt-2 pb-1 text-center">
         <small class="text-muted text-uppercase" style="font-size:.7rem;letter-spacing:.05em">Partenza tra</small>
         <div class="countdown-value fw-bold fs-3 text-success">--:--</div>
+        <div class="cd-delay-note text-warning small mb-1" style="min-height:1.2em"></div>
         <div class="d-flex gap-2 justify-content-center mt-1">
           <button class="btn btn-sm btn-success cd-notif-btn">
             <i class="bi bi-bell me-1"></i>Attiva allarme
