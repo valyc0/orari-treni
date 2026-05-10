@@ -68,7 +68,12 @@ async function loadTratta(card) {
   const trainNum2   = card.dataset.train2Num   || '';
   const trainDate2  = card.dataset.train2Date  || '';
   const codOrigine2 = card.dataset.codOrigine2 || '';
-  const transferSt  = card.dataset.transferStation || '';
+  const transferSt  = card.dataset.transferStation  || '';
+  // Dati terzo treno (2 coincidenze AI)
+  const trainNum3   = card.dataset.train3Num   || '';
+  const trainDate3  = card.dataset.train3Date  || '';
+  const codOrigine3 = card.dataset.codOrigine3 || '';
+  const transferSt2 = card.dataset.transfer2Station || '';
 
   const body = document.getElementById('trattaModalBody');
   if (!trainNum) {
@@ -87,8 +92,16 @@ async function loadTratta(card) {
   }
 
   try {
-    if (trainNum2 && codOrigine2 && trainDate2) {
-      // Coincidenza: carica entrambi i treni in parallelo
+    if (trainNum2 && codOrigine2 && trainDate2 && trainNum3 && codOrigine3 && trainDate3) {
+      // 2 coincidenze (AI): carica tutti e 3 i treni in parallelo
+      const [data1, data2, data3] = await Promise.all([
+        apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`),
+        apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine2)}/${encodeURIComponent(trainNum2)}/${encodeURIComponent(trainDate2)}`),
+        apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine3)}/${encodeURIComponent(trainNum3)}/${encodeURIComponent(trainDate3)}`),
+      ]);
+      body.innerHTML = renderFermateWith2Connections(data1, data2, data3, fromName, transferSt, transferSt2, toName, depTs);
+    } else if (trainNum2 && codOrigine2 && trainDate2) {
+      // 1 coincidenza: carica entrambi i treni in parallelo
       const [data1, data2] = await Promise.all([
         apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine)}/${encodeURIComponent(trainNum)}/${encodeURIComponent(trainDate)}`),
         apiJson(`/andamentoTreno/${encodeURIComponent(codOrigine2)}/${encodeURIComponent(trainNum2)}/${encodeURIComponent(trainDate2)}`),
@@ -422,5 +435,172 @@ function renderFermateWithConnection(data1, data2, fromName, transferName, toNam
   </div>`;
   html += `<div class="px-3 pt-2 pb-3">${renderLegStops(slice2, lastPassed2, transferName, toName, true, delayMs2)}</div>`;
 
+  return html;
+}
+
+/* ── renderFermateWith2Connections (AI – 3 treni, 2 coincidenze) ── */
+
+function renderFermateWith2Connections(data1, data2, data3, fromName, transfer1Name, transfer2Name, toName, depTs) {
+  if (!data1 || !data2 || !data3) return `<p class="text-center text-muted py-4">Nessuna fermata disponibile</p>`;
+
+  const cat1 = (data1.categoria || '').trim().toUpperCase() || 'REG';
+  const cat2 = (data2.categoria || '').trim().toUpperCase() || 'REG';
+  const cat3 = (data3.categoria || '').trim().toUpperCase() || 'REG';
+  const [bg1, tx1] = getCatColors(cat1);
+  const [bg2, tx2] = getCatColors(cat2);
+  const [bg3, tx3] = getCatColors(cat3);
+  const num1 = data1.numeroTreno || '';
+  const num2 = data2.numeroTreno || '';
+  const num3 = data3.numeroTreno || '';
+
+  const norm     = s => (s || '').trim().toLowerCase();
+  const fermate1 = data1.fermate || [];
+  const fermate2 = data2.fermate || [];
+  const fermate3 = data3.fermate || [];
+
+  const ritardo1 = data1.ritardo || 0;
+  const ritardo2 = data2.ritardo || 0;
+  const ritardo3 = data3.ritardo || 0;
+  const delayMs1 = ritardo1 * 60000;
+  const delayMs2 = ritardo2 * 60000;
+  const delayMs3 = ritardo3 * 60000;
+
+  function findIdx(fermate, n) {
+    return fermate.findIndex(f => norm(f.stazione).includes(n) || n.includes(norm(f.stazione)));
+  }
+
+  const fromNorm = norm(fromName);
+  const t1Norm   = norm(transfer1Name);
+  const t2Norm   = norm(transfer2Name);
+  const toNorm   = norm(toName);
+
+  const slice1 = fermate1.slice(
+    Math.max(0, findIdx(fermate1, fromNorm)),
+    findIdx(fermate1, t1Norm) >= 0 ? findIdx(fermate1, t1Norm) + 1 : fermate1.length
+  );
+  const t2Start = findIdx(fermate2, t1Norm);
+  const t2End   = findIdx(fermate2, t2Norm);
+  const slice2 = fermate2.slice(
+    t2Start >= 0 ? t2Start : 0,
+    t2End   >= 0 ? t2End + 1 : fermate2.length
+  );
+  const t3Start = findIdx(fermate3, t2Norm);
+  const t3End   = findIdx(fermate3, toNorm);
+  const slice3 = fermate3.slice(
+    t3Start >= 0 ? t3Start : 0,
+    t3End   >= 0 ? t3End + 1 : fermate3.length
+  );
+
+  if (!slice1.length && !slice2.length && !slice3.length) {
+    return `<p class="text-center text-muted py-4">Fermate non ancora disponibili (treni non ancora partiti)</p>`;
+  }
+
+  const now = Date.now();
+  function calcLP(fermate, delayMs) {
+    let idx = -1;
+    fermate.forEach((f, i) => {
+      if (f.actualFermataType === 1 || f.actualFermataType === 2 ||
+          f.effettiva || f.arrivoReale || f.partenzaReale) idx = i;
+    });
+    fermate.forEach((f, i) => {
+      if (i <= idx) return;
+      const p = f.programmata || f.arrivo_teorico || f.partenza_teorica;
+      if (p && (p + delayMs) < now) idx = i;
+    });
+    return idx;
+  }
+  const lp1 = calcLP(slice1, delayMs1);
+  const lp2 = calcLP(slice2, delayMs2);
+  const lp3 = calcLP(slice3, delayMs3);
+
+  function legStops(fermate, lpIdx, startName, endName, isLast, delayMs) {
+    const ritardo = Math.round(delayMs / 60000);
+    let html = '';
+    fermate.forEach((f, i) => {
+      const isPassed  = i < lpIdx;
+      const isCurrent = i === lpIdx;
+      const normSt    = norm(f.stazione);
+      const isFrom    = normSt.includes(norm(startName)) || norm(startName).includes(normSt);
+      const isTo      = normSt.includes(norm(endName))   || norm(endName).includes(normSt);
+      const oraProg    = f.arrivo_teorico || f.programmata;
+      const oraReal    = f.effettiva || f.arrivoReale || f.partenzaReale;
+      const oraStr     = oraProg ? formatTime(new Date(oraProg)) : '--:--';
+      const oraRealStr = oraReal && oraReal !== oraProg ? formatTime(new Date(oraReal)) : null;
+      const fRit = f.ritardo || ritardo || 0;
+      let ritBadge = '';
+      if ((isCurrent || isPassed) && fRit > 0)
+        ritBadge = `<span class="badge bg-${fRit > 5 ? 'danger' : 'warning text-dark'} ms-1">+${fRit}'</span>`;
+      let dotColor = isPassed ? '#6c757d' : '#1a56db', dotSize = 8;
+      if (isFrom || isTo) { dotColor = isFrom ? '#1a56db' : '#dc3545'; dotSize = 14; }
+      if (isCurrent)      { dotColor = '#1a56db'; dotSize = 14; }
+      const lineColor  = isPassed ? '#6c757d' : '#1a56db';
+      const dotOutline = isCurrent ? ';outline:3px solid rgba(26,86,219,.3)' : '';
+      let nameCls = isPassed ? 'text-muted' : (isFrom || isTo ? `fw-bold ${isFrom ? 'text-primary' : 'text-danger'}` : 'fw-semibold');
+      if (isCurrent) nameCls = 'fw-bold text-primary';
+      let rowBg = '';
+      if      (isFrom) rowBg = 'background:rgba(26,86,219,.06);border-radius:6px;padding:2px 4px;';
+      else if (isTo)   rowBg = 'background:rgba(220,53,69,.06);border-radius:6px;padding:2px 4px;';
+      const showLine = !(i === fermate.length - 1 && isLast);
+      const binEff  = isFrom ? (f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione)
+                             : (f.binarioEffettivoArrivoDescrizione   || f.binarioProgrammatoArrivoDescrizione);
+      const binProg = isFrom ? f.binarioProgrammatoPartenzaDescrizione : f.binarioProgrammatoArrivoDescrizione;
+      const binChanged = binEff && binProg && binEff !== binProg;
+      const binHtml = (isFrom || isTo || isCurrent) && binEff ? `
+        <div class="d-flex align-items-center gap-1 mt-1">
+          <small class="text-muted">Bin.</small>
+          <span class="badge ${binChanged ? 'bg-warning text-dark' : (isFrom ? 'bg-primary' : 'bg-danger')} platform-num">${esc(binEff)}</span>
+          ${binChanged ? `<small class="text-muted fst-italic">var. da ${esc(binProg)}</small>` : ''}
+        </div>` : '';
+      html += `
+        <div class="d-flex gap-2 align-items-stretch" style="min-height:${showLine ? '48px' : 'auto'}">
+          <div class="d-flex flex-column align-items-center flex-shrink-0" style="width:18px;padding-top:4px">
+            <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${dotColor};flex-shrink:0${dotOutline}"></div>
+            ${showLine ? `<div style="width:3px;flex:1;background:${lineColor};border-radius:2px;margin-top:3px"></div>` : ''}
+          </div>
+          <div class="flex-grow-1 pb-2" style="${rowBg}">
+            <div class="d-flex justify-content-between align-items-start">
+              <span class="${nameCls}" style="font-size:.9rem">${esc(f.stazione || '')}</span>
+              <span class="ms-2 flex-shrink-0" style="font-size:.9rem">${oraStr}${oraRealStr ? ` <span class="text-muted" style="font-size:.75rem">(${oraRealStr})</span>` : ''}</span>
+            </div>
+            ${binHtml}${ritBadge}
+            ${isCurrent ? `<div class="text-primary" style="font-size:.72rem"><i class="bi bi-train-front-fill me-1"></i>Qui ora</div>` : ''}
+          </div>
+        </div>`;
+    });
+    return html;
+  }
+
+  function trainHeader(bg, tx, cat, num, rit) {
+    return `
+    <div class="px-3 pt-2 pb-1 border-bottom" style="background:rgba(26,86,219,.04)">
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge ${bg} ${tx}">${esc(cat)}</span>
+        <span class="fw-semibold small">${esc(String(num))}</span>
+        ${rit > 0 ? `<span class="badge bg-${rit > 5 ? 'danger' : 'warning'} ${rit > 5 ? '' : 'text-dark'} ms-auto">+${rit} min</span>`
+                  : '<span class="badge bg-success ms-auto">Puntuale</span>'}
+      </div>
+    </div>`;
+  }
+
+  function cambioDiv(stazione, cat, num) {
+    return `
+    <div class="mx-3 my-2 rounded-3 border border-warning d-flex align-items-center gap-2 px-3 py-2" style="background:#fffbeb">
+      <i class="bi bi-arrow-repeat text-warning fs-5"></i>
+      <div>
+        <div class="fw-bold small">Cambio a ${esc(stazione)}</div>
+        <div class="text-muted" style="font-size:.75rem">Prosegui con ${esc(cat)} ${esc(String(num))}</div>
+      </div>
+    </div>`;
+  }
+
+  let html = '';
+  html += trainHeader(bg1, tx1, cat1, num1, ritardo1);
+  html += `<div class="px-3 pt-2">${legStops(slice1, lp1, fromName, transfer1Name, false, delayMs1)}</div>`;
+  html += cambioDiv(transfer1Name, cat2, num2);
+  html += trainHeader(bg2, tx2, cat2, num2, ritardo2);
+  html += `<div class="px-3 pt-2">${legStops(slice2, lp2, transfer1Name, transfer2Name, false, delayMs2)}</div>`;
+  html += cambioDiv(transfer2Name, cat3, num3);
+  html += trainHeader(bg3, tx3, cat3, num3, ritardo3);
+  html += `<div class="px-3 pt-2 pb-3">${legStops(slice3, lp3, transfer2Name, toName, true, delayMs3)}</div>`;
   return html;
 }

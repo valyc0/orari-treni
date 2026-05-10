@@ -728,6 +728,11 @@ function renderConnection2Card(c) {
        data-train2-num="${esc(String(leg2.train.numeroTreno || ''))}"
        data-train2-date="${esc(String(leg2.train.dataPartenzaTreno || (transfer1.depTime ? new Date(new Date(transfer1.depTime).setHours(0,0,0,0)).getTime() : '')))}"
        data-cod-origine2="${esc(leg2.train.codOrigine || '')}"
+       data-train3-num="${esc(String(leg3.train.numeroTreno || ''))}"
+       data-train3-date="${esc(String(leg3.train.dataPartenzaTreno || (transfer2.depTime ? new Date(new Date(transfer2.depTime).setHours(0,0,0,0)).getTime() : '')))}"
+       data-cod-origine3="${esc(leg3.train.codOrigine || '')}"
+       data-transfer-station="${esc(transfer1.stationName)}"
+       data-transfer2-station="${esc(transfer2.stationName)}"
        data-route-from="${esc(routeFrom.name)}"
        data-route-to="${esc(routeTo.name)}">
     <div class="card-body p-3">
