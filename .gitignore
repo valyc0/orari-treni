@@ -1,2 +1,9 @@
 cert.pem
 key.pem
+
+# orari-treni-react
+orari-treni-react/.next/
+orari-treni-react/node_modules/
+orari-treni-react/tsconfig.tsbuildinfo
+orari-treni-react/next-env.d.ts
+
